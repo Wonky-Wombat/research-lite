@@ -1,8 +1,8 @@
 import hashlib
 from pathlib import Path
 
-from langchain.document_loaders import TextLoader
-from langchain.schema import Document
+from langchain_community.document_loaders import TextLoader
+from langchain_core.documents import Document
 
 
 def _sha1(text: str) -> str:

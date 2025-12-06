@@ -1,4 +1,4 @@
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from ..utils.loader_utils import load_text_by_ext
 
