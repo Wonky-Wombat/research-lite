@@ -6,6 +6,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 from .csv_loader import load_csv
+from .excel_loader import load_excel
 from .html_loader import load_html
 from .json_loader import load_json
 from .markdown_loader import load_markdown
@@ -20,6 +21,8 @@ _LOADER_BY_EXT: dict[str, Callable[[str], list[Document]]] = {
     "html": load_html,
     "htm": load_html,
     "csv": load_csv,
+    "xlsx": load_excel,
+    "xls": load_excel,
     "docx": load_word,
     "json": load_json,
 }

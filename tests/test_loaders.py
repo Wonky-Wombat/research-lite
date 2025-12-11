@@ -7,12 +7,14 @@ from langchain_core.documents import Document
 
 import knowledge_lite.ingestion as ingestion_module
 import knowledge_lite.ingestion.csv_loader as csv_loader_module
+import knowledge_lite.ingestion.excel_loader as excel_loader_module
 import knowledge_lite.ingestion.html_loader as html_loader_module
 import knowledge_lite.ingestion.json_loader as json_loader_module
 import knowledge_lite.ingestion.pdf_loader as pdf_loader_module
 import knowledge_lite.ingestion.word_loader as word_loader_module
 from knowledge_lite.ingestion import load_documents
 from knowledge_lite.ingestion.csv_loader import load_csv
+from knowledge_lite.ingestion.excel_loader import load_excel
 from knowledge_lite.ingestion.html_loader import load_html
 from knowledge_lite.ingestion.json_loader import load_json
 from knowledge_lite.ingestion.markdown_loader import load_markdown
@@ -178,6 +180,31 @@ def test_load_word_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
         meta = doc.metadata
         assert_metadata_matches_file(meta, word)
+        assert meta["doc_id"] == _sha1(doc.page_content.strip())
+        assert meta["from_loader"] is True
+
+
+def test_load_excel_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    excel_root = tmp_path / "excel"
+    excel_files = create_files_with_content(
+        excel_root,
+        ["first.xlsx", "nested/second.XLS"],
+        "dummy",
+    )
+
+    dummy_loader = make_dummy_loader(DUMMY_CONTENT)
+    monkeypatch.setattr(excel_loader_module, "UnstructuredExcelLoader", dummy_loader)
+
+    docs = load_excel(str(excel_root))
+    assert len(docs) == len(excel_files)
+
+    docs_by_title = collect_docs_by_title(docs)
+    for excel_file in excel_files:
+        doc = docs_by_title[excel_file.stem]
+        assert doc.page_content == DUMMY_CONTENT
+
+        meta = doc.metadata
+        assert_metadata_matches_file(meta, excel_file)
         assert meta["doc_id"] == _sha1(doc.page_content.strip())
         assert meta["from_loader"] is True
 
