@@ -7,6 +7,7 @@ from langchain_core.documents import Document
 
 from .csv_loader import load_csv
 from .html_loader import load_html
+from .json_loader import load_json
 from .markdown_loader import load_markdown
 from .pdf_loader import load_pdf
 from .text_loader import load_text
@@ -20,6 +21,7 @@ _LOADER_BY_EXT: dict[str, Callable[[str], list[Document]]] = {
     "htm": load_html,
     "csv": load_csv,
     "docx": load_word,
+    "json": load_json,
 }
 
 

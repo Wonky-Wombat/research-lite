@@ -8,11 +8,13 @@ from langchain_core.documents import Document
 import knowledge_lite.ingestion as ingestion_module
 import knowledge_lite.ingestion.csv_loader as csv_loader_module
 import knowledge_lite.ingestion.html_loader as html_loader_module
+import knowledge_lite.ingestion.json_loader as json_loader_module
 import knowledge_lite.ingestion.pdf_loader as pdf_loader_module
 import knowledge_lite.ingestion.word_loader as word_loader_module
 from knowledge_lite.ingestion import load_documents
 from knowledge_lite.ingestion.csv_loader import load_csv
 from knowledge_lite.ingestion.html_loader import load_html
+from knowledge_lite.ingestion.json_loader import load_json
 from knowledge_lite.ingestion.markdown_loader import load_markdown
 from knowledge_lite.ingestion.pdf_loader import load_pdf
 from knowledge_lite.ingestion.text_loader import load_text
@@ -126,6 +128,31 @@ def test_load_csv_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
         meta = doc.metadata
         assert_metadata_matches_file(meta, csv_file)
+        assert meta["doc_id"] == _sha1(doc.page_content.strip())
+        assert meta["from_loader"] is True
+
+
+def test_load_json_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    json_root = tmp_path / "json_data"
+    json_files = create_files_with_content(
+        json_root,
+        ["first.json", "nested/second.JSON"],
+        '[{"content": "Hello KnowledgeLiteRAG"}]',
+    )
+
+    dummy_loader = make_dummy_loader(DUMMY_CONTENT)
+    monkeypatch.setattr(json_loader_module, "JSONLoader", dummy_loader)
+
+    docs = load_json(str(json_root))
+    assert len(docs) == len(json_files)
+
+    docs_by_title = collect_docs_by_title(docs)
+    for json_file in json_files:
+        doc = docs_by_title[json_file.stem]
+        assert doc.page_content == DUMMY_CONTENT
+
+        meta = doc.metadata
+        assert_metadata_matches_file(meta, json_file)
         assert meta["doc_id"] == _sha1(doc.page_content.strip())
         assert meta["from_loader"] is True
 
