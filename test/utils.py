@@ -1,12 +1,30 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
 
 DUMMY_CONTENT = "Hello KnowledgeLiteRAG"
+
+
+class ConstantContentLoader:
+    """Loader that returns a single Document with constant content."""
+
+    def __init__(self, path: str | None = None, *args: Any, content: str, **kwargs: Any) -> None:
+        raw_path = path or kwargs.get("file_path") or kwargs.get("path") or ""
+        self.path = Path(raw_path)
+        self.content = content
+
+    def load(self) -> list[Document]:
+        return [
+            Document(
+                page_content=self.content,
+                metadata={"from_loader": True},
+            )
+        ]
 
 
 def create_files_with_content(base_dir: Path, filenames: list[str], content: str) -> list[Path]:
@@ -21,23 +39,10 @@ def create_files_with_content(base_dir: Path, filenames: list[str], content: str
     return created_files
 
 
-def make_dummy_loader(content: str) -> type:
-    """Return a dummy loader class compatible with langchain loaders."""
+def make_dummy_loader(content: str) -> Callable[..., ConstantContentLoader]:
+    """Return a dummy loader callable compatible with langchain loaders."""
 
-    class DummyLoader:
-        def __init__(self, *args: Any, **kwargs: Any):
-            path = kwargs.get("file_path") or kwargs.get("path") or (args[0] if args else "")
-            self.path = Path(path)
-
-        def load(self) -> list[Document]:
-            return [
-                Document(
-                    page_content=content,
-                    metadata={"from_loader": True},
-                )
-            ]
-
-    return DummyLoader
+    return partial(ConstantContentLoader, content=content)
 
 
 def collect_docs_by_title(documents: list[Document]) -> dict[str, Document]:

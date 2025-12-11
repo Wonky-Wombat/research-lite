@@ -42,4 +42,4 @@ jobs:
 
       - name: mypy (type checking)
         run: |
-          mypy knowledge_lite tests
+          mypy knowledge_lite test

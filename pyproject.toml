@@ -16,7 +16,7 @@ select = [
 ignore = ["ANN101", "ANN102"]   #
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN"]
+"test/**" = ["ANN"]
 
 [tool.ruff.format]
 quote-style = "double"

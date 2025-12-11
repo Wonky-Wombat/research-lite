@@ -19,6 +19,11 @@ class StubEmbeddings(Embeddings):
         return [float(len(text))]
 
 
+class BrokenEmbeddings(StubEmbeddings):
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return super().embed_documents(texts[:-1])
+
+
 def test_embed_documents_batches_and_preserves_metadata() -> None:
     documents = [
         Document(page_content="first", metadata={"chunk_id": "1"}),
@@ -41,10 +46,6 @@ def test_embed_documents_empty_input_returns_empty() -> None:
 
 
 def test_embed_documents_raises_on_mismatched_vectors() -> None:
-    class BrokenEmbeddings(StubEmbeddings):
-        def embed_documents(self, texts: list[str]) -> list[list[float]]:
-            return super().embed_documents(texts[:-1])
-
     backend = BrokenEmbeddings()
     service = EmbeddingService(backend)
     docs = [Document(page_content="a"), Document(page_content="b")]

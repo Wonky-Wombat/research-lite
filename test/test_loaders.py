@@ -21,7 +21,7 @@ from knowledge_lite.ingestion.markdown_loader import load_markdown
 from knowledge_lite.ingestion.pdf_loader import load_pdf
 from knowledge_lite.ingestion.text_loader import load_text
 from knowledge_lite.ingestion.word_loader import load_word
-from tests.utils import (
+from test.utils import (
     DUMMY_CONTENT,
     assert_metadata_matches_file,
     collect_docs_by_title,
