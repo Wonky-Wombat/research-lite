@@ -6,13 +6,22 @@ import pytest
 from langchain_core.documents import Document
 
 import knowledge_lite.ingestion as ingestion_module
+import knowledge_lite.ingestion.html_loader as html_loader_module
 import knowledge_lite.ingestion.pdf_loader as pdf_loader_module
 import knowledge_lite.ingestion.word_loader as word_loader_module
 from knowledge_lite.ingestion import load_documents
+from knowledge_lite.ingestion.html_loader import load_html
 from knowledge_lite.ingestion.markdown_loader import load_markdown
 from knowledge_lite.ingestion.pdf_loader import load_pdf
 from knowledge_lite.ingestion.text_loader import load_text
 from knowledge_lite.ingestion.word_loader import load_word
+from tests.utils import (
+    DUMMY_CONTENT,
+    assert_metadata_matches_file,
+    collect_docs_by_title,
+    create_files_with_content,
+    make_dummy_loader,
+)
 
 
 def _sha1(text: str) -> str:
@@ -28,7 +37,7 @@ LOADERS: dict[str, Callable[[str], list[Document]]] = {
 @pytest.mark.parametrize("ext", ["md", "txt"])
 def test_load_single_md_file(tmp_path: Path, ext: str) -> None:
     file = tmp_path / f"test.{ext}"
-    content = "Hello KnowledgeLiteRAG"
+    content = DUMMY_CONTENT
     file.write_text(content, encoding="utf-8")
 
     docs: list[Document] = LOADERS[ext](str(file))
@@ -37,10 +46,7 @@ def test_load_single_md_file(tmp_path: Path, ext: str) -> None:
     doc = docs[0]
     assert doc.page_content.strip() == content
     meta = doc.metadata
-    assert meta["ext"] == ext
-    assert meta["title"] == "test"
-    assert Path(meta["source_path"]).resolve() == file.resolve()
-    assert isinstance(meta["mtime"], int | float)
+    assert_metadata_matches_file(meta, file)
     assert isinstance(meta["doc_id"], str) and len(meta["doc_id"]) == 40
     assert meta["doc_id"] == _sha1(content.strip())
 
@@ -55,79 +61,69 @@ def test_load_pdf_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     for pdf in pdf_files:
         pdf.write_bytes(b"%PDF-1.0\n% Hello KnowledgeLiteRAG\n")
 
-    dummy_doc_content = "Hello KnowledgeLiteRAG"
-
-    class DummyLoader:
-        def __init__(self, path: str):
-            self.path = Path(path)
-
-        def load(self) -> list[Document]:
-            return [
-                Document(
-                    page_content=dummy_doc_content,
-                    metadata={"from_loader": True},
-                )
-            ]
-
-    monkeypatch.setattr(pdf_loader_module, "PyPDFLoader", DummyLoader)
+    dummy_loader = make_dummy_loader(DUMMY_CONTENT)
+    monkeypatch.setattr(pdf_loader_module, "PyPDFLoader", dummy_loader)
 
     docs = load_pdf(str(pdf_root))
     assert len(docs) == len(pdf_files)
 
-    docs_by_title = {doc.metadata["title"]: doc for doc in docs}
+    docs_by_title = collect_docs_by_title(docs)
     for pdf in pdf_files:
         doc = docs_by_title[pdf.stem]
-        assert doc.page_content == dummy_doc_content
+        assert doc.page_content == DUMMY_CONTENT
 
         meta = doc.metadata
-        assert meta["ext"] == "pdf"
-        assert meta["title"] == pdf.stem
-        assert Path(meta["source_path"]).resolve() == pdf.resolve()
-        assert isinstance(meta["mtime"], float | int)
+        assert_metadata_matches_file(meta, pdf)
+        assert meta["doc_id"] == _sha1(doc.page_content.strip())
+        assert meta["from_loader"] is True
+
+
+def test_load_html_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    html_root = tmp_path / "html"
+    html_files = create_files_with_content(
+        html_root,
+        ["first.html", "nested/second.HTM"],
+        "<html><body>Hello KnowledgeLiteRAG</body></html>",
+    )
+
+    dummy_loader = make_dummy_loader(DUMMY_CONTENT)
+    monkeypatch.setattr(html_loader_module, "UnstructuredHTMLLoader", dummy_loader)
+
+    docs = load_html(str(html_root))
+    assert len(docs) == len(html_files)
+
+    docs_by_title = collect_docs_by_title(docs)
+    for html_file in html_files:
+        doc = docs_by_title[html_file.stem]
+        assert doc.page_content == DUMMY_CONTENT
+
+        meta = doc.metadata
+        assert_metadata_matches_file(meta, html_file)
         assert meta["doc_id"] == _sha1(doc.page_content.strip())
         assert meta["from_loader"] is True
 
 
 def test_load_word_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     word_root = tmp_path / "docs"
-    word_root.mkdir()
-    nested = word_root / "nested"
-    nested.mkdir()
+    word_files = create_files_with_content(
+        word_root,
+        ["first.docx", "nested/second.DOCX"],
+        DUMMY_CONTENT,
+    )
 
-    word_files = [word_root / "first.docx", nested / "second.DOCX"]
-    dummy_file_content = "Hello KnowledgeLiteRAG"
-    for word in word_files:
-        word.write_text(dummy_file_content, encoding="utf-8")
-
-    dummy_doc_content = "Hello KnowledgeLiteRAG"
-
-    class DummyLoader:
-        def __init__(self, path: str):
-            self.path = Path(path)
-
-        def load(self) -> list[Document]:
-            return [
-                Document(
-                    page_content=dummy_doc_content,
-                    metadata={"from_loader": True},
-                )
-            ]
-
-    monkeypatch.setattr(word_loader_module, "Docx2txtLoader", DummyLoader)
+    dummy_loader = make_dummy_loader(DUMMY_CONTENT)
+    monkeypatch.setattr(word_loader_module, "Docx2txtLoader", dummy_loader)
 
     docs = load_word(str(word_root))
     assert len(docs) == len(word_files)
 
-    docs_by_title = {doc.metadata["title"]: doc for doc in docs}
+    docs_by_title = collect_docs_by_title(docs)
     for word in word_files:
         doc = docs_by_title[word.stem]
-        assert doc.page_content == dummy_doc_content
+        assert doc.page_content == DUMMY_CONTENT
 
         meta = doc.metadata
-        assert meta["ext"] == "docx"
-        assert meta["title"] == word.stem
-        assert Path(meta["source_path"]).resolve() == word.resolve()
-        assert isinstance(meta["mtime"], float | int)
+        assert_metadata_matches_file(meta, word)
         assert meta["doc_id"] == _sha1(doc.page_content.strip())
         assert meta["from_loader"] is True
 
