@@ -6,10 +6,12 @@ import pytest
 from langchain_core.documents import Document
 
 import knowledge_lite.ingestion as ingestion_module
+import knowledge_lite.ingestion.csv_loader as csv_loader_module
 import knowledge_lite.ingestion.html_loader as html_loader_module
 import knowledge_lite.ingestion.pdf_loader as pdf_loader_module
 import knowledge_lite.ingestion.word_loader as word_loader_module
 from knowledge_lite.ingestion import load_documents
+from knowledge_lite.ingestion.csv_loader import load_csv
 from knowledge_lite.ingestion.html_loader import load_html
 from knowledge_lite.ingestion.markdown_loader import load_markdown
 from knowledge_lite.ingestion.pdf_loader import load_pdf
@@ -103,6 +105,31 @@ def test_load_html_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert meta["from_loader"] is True
 
 
+def test_load_csv_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    csv_root = tmp_path / "csvs"
+    csv_files = create_files_with_content(
+        csv_root,
+        ["first.csv", "nested/second.CSV"],
+        "title,body\nhello,world",
+    )
+
+    dummy_loader = make_dummy_loader(DUMMY_CONTENT)
+    monkeypatch.setattr(csv_loader_module, "CSVLoader", dummy_loader)
+
+    docs = load_csv(str(csv_root))
+    assert len(docs) == len(csv_files)
+
+    docs_by_title = collect_docs_by_title(docs)
+    for csv_file in csv_files:
+        doc = docs_by_title[csv_file.stem]
+        assert doc.page_content == DUMMY_CONTENT
+
+        meta = doc.metadata
+        assert_metadata_matches_file(meta, csv_file)
+        assert meta["doc_id"] == _sha1(doc.page_content.strip())
+        assert meta["from_loader"] is True
+
+
 def test_load_word_enriches_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     word_root = tmp_path / "docs"
     word_files = create_files_with_content(
@@ -150,7 +177,7 @@ def test_load_documents_dispatches_selected_extensions(
 
 def test_load_documents_rejects_unknown_extensions(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unsupported extensions"):
-        load_documents(str(tmp_path), extensions=["csv"])
+        load_documents(str(tmp_path), extensions=["foo"])
 
 
 def test_load_documents_rejects_empty_extension_list(tmp_path: Path) -> None:

@@ -25,7 +25,8 @@ def make_dummy_loader(content: str) -> type:
     """Return a dummy loader class compatible with langchain loaders."""
 
     class DummyLoader:
-        def __init__(self, path: str, **_: Any):
+        def __init__(self, *args: Any, **kwargs: Any):
+            path = kwargs.get("file_path") or kwargs.get("path") or (args[0] if args else "")
             self.path = Path(path)
 
         def load(self) -> list[Document]:
