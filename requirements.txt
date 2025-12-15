@@ -1,4 +1,13 @@
+torch==2.3.1
 langchain
-pypdf
 langchain-community
+langchain-text-splitters
+pypdf
 pytest
+sentence-transformers
+langchain-huggingface
+docx2txt
+unstructured
+jq
+pandas
+msoffcrypto-tool
