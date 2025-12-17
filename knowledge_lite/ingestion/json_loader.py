@@ -1,3 +1,5 @@
+import json
+
 from langchain_community.document_loaders import JSONLoader
 from langchain_core.documents import Document
 
@@ -10,8 +12,12 @@ def load_json(path: str) -> list[Document]:
 
     documents: list[Document] = []
     for json_file in json_files:
-        loader = JSONLoader(file_path=str(json_file), jq_schema=".", text_content=True)
+        loader = JSONLoader(file_path=str(json_file), jq_schema=".", text_content=False)
         for document in loader.load():
-            documents.append(populate_document_metadata(document, json_file))
+            content = document.page_content
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            normalized = Document(page_content=content, metadata=document.metadata)
+            documents.append(populate_document_metadata(normalized, json_file))
 
     return documents
