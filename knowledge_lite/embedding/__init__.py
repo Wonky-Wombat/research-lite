@@ -31,6 +31,10 @@ class EmbeddingService:
         self._embedding_backend = embedding_backend
         self._config = config or EmbeddingConfig()
 
+    @property
+    def backend(self) -> Embeddings:
+        return self._embedding_backend
+
     def embed_documents(self, documents: Iterable[Document]) -> list[EmbeddedDocument]:
         docs = [
             Document(page_content=doc.page_content, metadata=dict(doc.metadata))

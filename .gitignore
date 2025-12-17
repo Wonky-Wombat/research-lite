@@ -211,6 +211,7 @@ __marimo__/
 
 # Test
 sample_docs/
+demo_docs/
 
 # MacOS
 .DS_Store

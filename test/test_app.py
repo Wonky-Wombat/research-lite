@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
@@ -21,12 +22,12 @@ def test_ingest_and_embed_runs_pipeline(tmp_path: Path) -> None:
     file = tmp_path / "sample.txt"
     file.write_text("Hello KnowledgeLiteRAG", encoding="utf-8")
 
-    service = EmbeddingService(LengthEmbeddings(), EmbeddingConfig(batch_size=4))
-    embedded = ingest_and_embed(
+    embedding_service = EmbeddingService(LengthEmbeddings(), EmbeddingConfig(batch_size=4))
+    embedded, vector_store, service = ingest_and_embed(
         str(tmp_path),
         extensions=["txt"],
         split_config=SplitConfig(chunk_size=50, chunk_overlap=0),
-        embedding_service=service,
+        embedding_service=embedding_service,
     )
 
     assert len(embedded) == 1
@@ -36,3 +37,8 @@ def test_ingest_and_embed_runs_pipeline(tmp_path: Path) -> None:
     assert metadata["chunk_index"] == 0
     assert metadata["num_chunks"] == 1
     assert metadata["chunk_id"].endswith(":0")
+    if importlib.util.find_spec("faiss") is not None:
+        assert vector_store is not None
+    else:
+        assert vector_store is None
+    assert service is embedding_service
