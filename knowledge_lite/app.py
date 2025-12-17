@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from pathlib import Path
 
 from knowledge_lite.embedding import EmbeddedDocument, EmbeddingService
 from knowledge_lite.embedding.embedding_builder import (
@@ -67,8 +68,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--chunk-overlap", type=int, default=200)
     parser.add_argument(
-        "--query",
-        help="Optional text to embed and search against the built FAISS index.",
+        "--save-index", help="Directory to save the built FAISS index (if available)."
+    )
+    parser.add_argument(
+        "--load-index", help="Directory containing a previously saved FAISS index to load."
+    )
+    parser.add_argument("--index-name", default="index")
+    parser.add_argument("--allow-dangerous-deserialization", action="store_true")
+    parser.add_argument(
+        "--query", help="Optional text to embed and search against the built FAISS index."
     )
     parser.add_argument(
         "--top-k",
@@ -84,23 +92,53 @@ def main() -> None:
     args = parser.parse_args()
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
-    embedded, vector_store, service = ingest_and_embed(
-        args.path,
-        extensions=args.extensions,
-        split_config=split_config,
-        model_name=args.model_name,
-        device=args.device,
-        batch_size=args.batch_size,
-    )
-    print(
-        f"Ingested path '{args.path}' with {len(embedded)} embedded chunks "
-        f"using model '{args.model_name}'."
-    )
-    if vector_store is not None:
-        print("Built FAISS vector store with the embedded chunks.")
+
+    embedded: list[EmbeddedDocument] = []
+    vector_store: FaissVectorStore | None = None
+    service: EmbeddingService | None = None
+
+    if args.load_index:
+        service = build_default_embedding_service(
+            model_name=args.model_name,
+            device=args.device,
+            batch_size=args.batch_size,
+        )
+        try:
+            vector_store = FaissVectorStore.load(
+                Path(args.load_index),
+                embedding_backend=service.backend,
+                index_name=args.index_name,
+                allow_dangerous_deserialization=args.allow_dangerous_deserialization,
+            )
+            print(f"Loaded FAISS index '{args.index_name}' from '{args.load_index}'.")
+        except ImportError as exc:
+            raise RuntimeError("FAISS is required to load a index.") from exc
+    else:
+        embedded, vector_store, service = ingest_and_embed(
+            args.path,
+            extensions=args.extensions,
+            split_config=split_config,
+            model_name=args.model_name,
+            device=args.device,
+            batch_size=args.batch_size,
+        )
+        print(
+            f"Ingested path '{args.path}' with {len(embedded)} embedded chunks "
+            f"using model '{args.model_name}'."
+        )
+        if vector_store is not None:
+            print("Built FAISS vector store with the embedded chunks.")
+        if args.save_index:
+            if vector_store is None:
+                print("Skipping FAISS index save because the dependency is unavailable.")
+            else:
+                output_dir = Path(args.save_index)
+                vector_store.save(output_dir, index_name=args.index_name)
+                print(f"Saved FAISS index '{args.index_name}' to '{output_dir}'.")
+
     if args.query:
         if vector_store is None:
-            print("Cannot run query because the FAISS index was not built (missing faiss?).")
+            print("Cannot run query because the FAISS index was not built or loaded.")
         elif service is None:
             print("Cannot run query because no embedding service was available.")
         else:

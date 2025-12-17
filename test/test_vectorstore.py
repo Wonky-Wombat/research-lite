@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -43,7 +44,7 @@ def test_from_documents_indexes_data_and_supports_similarity_search() -> None:
     assert len(scored) == 1
     doc, score = scored[0]
     assert doc.metadata["id"] == "doc2"
-    assert isinstance(score, float)
+    assert isinstance(score, float | np.floating)
 
 
 def test_add_appends_documents_to_existing_index() -> None:
