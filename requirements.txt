@@ -1,7 +1,9 @@
-torch==2.3.1
+torch
 langchain
 langchain-community
 langchain-text-splitters
+langchain-openai
+python-dotenv
 pypdf
 pytest
 sentence-transformers

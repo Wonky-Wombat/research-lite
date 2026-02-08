@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import argparse
 from collections.abc import Iterable
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from knowledge_lite.embedding import EmbeddedDocument, EmbeddingService
 from knowledge_lite.embedding.embedding_builder import (
     DEFAULT_MODEL_NAME,
     build_default_embedding_service,
 )
+from knowledge_lite.generation import RAGGenerator
 from knowledge_lite.ingestion import load_documents
 from knowledge_lite.preprocessing import SplitConfig, split_documents
 from knowledge_lite.vectorstore import FaissVectorStore
@@ -84,10 +91,36 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=4,
         help="Number of search results to return when running a query.",
     )
+    # LLM Generation arguments
+    parser.add_argument(
+        "--llm-model",
+        default="gpt-5-mini",
+        help="LLM model name for generation (e.g., gpt-3.5-turbo, gpt-4).",
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        help="API Key for the LLM service. Can also be set via OPENAI_API_KEY env var.",
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        help="Base URL for the LLM service (useful for compatible APIs like DeepSeek/LocalAI).",
+    )
+    parser.add_argument(
+        "--no-generation",
+        action="store_true",
+        help="Skip LLM generation and only show retrieval results.",
+    )
     return parser
 
 
 def main() -> None:
+    # Load environment variables from .env file if present
+    load_dotenv()
+
+    # Clean up API Key from env if present (remove whitespace/newlines)
+    if os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"].strip()
+
     parser = _build_arg_parser()
     args = parser.parse_args()
 
@@ -148,9 +181,27 @@ def main() -> None:
             if not results:
                 print("No results returned from FAISS.")
             else:
+                print(f"Found {len(results)} relevant chunks:")
                 for idx, doc in enumerate(results, start=1):
                     preview = doc.page_content[:80].replace("\n", " ")
                     print(f"[{idx}] {preview!r} metadata={doc.metadata}")
+
+                if not args.no_generation:
+                    print("\nGenerating answer...")
+                    try:
+                        # Ensure we pass the cleaned key if it wasn't passed via args
+                        final_api_key = args.llm_api_key or os.environ.get("OPENAI_API_KEY")
+
+                        generator = RAGGenerator(
+                            model_name=args.llm_model,
+                            api_key=final_api_key,
+                            base_url=args.llm_base_url,
+                        )
+                        answer = generator.generate_answer(args.query, results)
+                        print(f"\nAnswer:\n{answer}")
+                    except Exception as e:
+                        print(f"Failed to generate answer: {e}")
+                        print("Tip: Ensure you have set OPENAI_API_KEY or passed --llm-api-key.")
 
 
 if __name__ == "__main__":

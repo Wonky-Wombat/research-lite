@@ -209,9 +209,13 @@ __marimo__/
 # JetBrains
 .idea/
 
+# Mac
+.DS_Store
+
 # Test
 sample_docs/
 demo_docs/
+test/
 
-# MacOS
-.DS_Store
+# Local Data & Indexes
+indexes/
