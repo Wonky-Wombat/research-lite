@@ -5,22 +5,22 @@ from pathlib import Path
 import pytest
 from langchain_core.documents import Document
 
-import knowledge_lite.ingestion as ingestion_module
-import knowledge_lite.ingestion.csv_loader as csv_loader_module
-import knowledge_lite.ingestion.excel_loader as excel_loader_module
-import knowledge_lite.ingestion.html_loader as html_loader_module
-import knowledge_lite.ingestion.json_loader as json_loader_module
-import knowledge_lite.ingestion.pdf_loader as pdf_loader_module
-import knowledge_lite.ingestion.word_loader as word_loader_module
-from knowledge_lite.ingestion import load_documents
-from knowledge_lite.ingestion.csv_loader import load_csv
-from knowledge_lite.ingestion.excel_loader import load_excel
-from knowledge_lite.ingestion.html_loader import load_html
-from knowledge_lite.ingestion.json_loader import load_json
-from knowledge_lite.ingestion.markdown_loader import load_markdown
-from knowledge_lite.ingestion.pdf_loader import load_pdf
-from knowledge_lite.ingestion.text_loader import load_text
-from knowledge_lite.ingestion.word_loader import load_word
+import research_lite.ingestion as ingestion_module
+import research_lite.ingestion.csv_loader as csv_loader_module
+import research_lite.ingestion.excel_loader as excel_loader_module
+import research_lite.ingestion.html_loader as html_loader_module
+import research_lite.ingestion.json_loader as json_loader_module
+import research_lite.ingestion.pdf_loader as pdf_loader_module
+import research_lite.ingestion.word_loader as word_loader_module
+from research_lite.ingestion import load_documents
+from research_lite.ingestion.csv_loader import load_csv
+from research_lite.ingestion.excel_loader import load_excel
+from research_lite.ingestion.html_loader import load_html
+from research_lite.ingestion.json_loader import load_json
+from research_lite.ingestion.markdown_loader import load_markdown
+from research_lite.ingestion.pdf_loader import load_pdf
+from research_lite.ingestion.text_loader import load_text
+from research_lite.ingestion.word_loader import load_word
 from test.utils import (
     DUMMY_CONTENT,
     assert_metadata_matches_file,

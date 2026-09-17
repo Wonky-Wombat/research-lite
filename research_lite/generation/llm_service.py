@@ -15,7 +15,7 @@ except ImportError:
 from langchain_openai import ChatOpenAI
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are KnowledgeLiteRAG, a helpful assistant powered by a lightweight RAG system.\n"
+    "You are ResearchLite, a helpful assistant powered by a lightweight RAG system.\n"
     "Use the following pieces of retrieved context to answer the user's question.\n"
     "If the answer is not in the context, say that you don't know. Keep the answer concise.\n\n"
     "Context:\n{context}"

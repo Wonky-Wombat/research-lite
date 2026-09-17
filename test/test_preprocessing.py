@@ -1,6 +1,6 @@
 from langchain_core.documents import Document
 
-from knowledge_lite.preprocessing import (
+from research_lite.preprocessing import (
     SplitConfig,
     _select_separators,
     split_documents,

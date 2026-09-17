@@ -10,15 +10,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from knowledge_lite.embedding import EmbeddedDocument, EmbeddingService
-from knowledge_lite.embedding.embedding_builder import (
+from research_lite.embedding import EmbeddedDocument, EmbeddingService
+from research_lite.embedding.embedding_builder import (
     DEFAULT_MODEL_NAME,
     build_default_embedding_service,
 )
-from knowledge_lite.generation import RAGGenerator
-from knowledge_lite.ingestion import load_documents
-from knowledge_lite.preprocessing import SplitConfig, split_documents
-from knowledge_lite.vectorstore import FaissVectorStore
+from research_lite.generation import RAGGenerator
+from research_lite.ingestion import load_documents
+from research_lite.preprocessing import SplitConfig, split_documents
+from research_lite.vectorstore import FaissVectorStore
 
 
 def ingest_and_embed(

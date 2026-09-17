@@ -5,9 +5,9 @@ from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
 
-from knowledge_lite.app import ingest_and_embed
-from knowledge_lite.embedding import EmbeddingConfig, EmbeddingService
-from knowledge_lite.preprocessing import SplitConfig
+from research_lite.app import ingest_and_embed
+from research_lite.embedding import EmbeddingConfig, EmbeddingService
+from research_lite.preprocessing import SplitConfig
 
 
 class LengthEmbeddings(Embeddings):

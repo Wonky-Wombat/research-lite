@@ -4,7 +4,7 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from knowledge_lite.embedding import EmbeddingConfig, EmbeddingService
+from research_lite.embedding import EmbeddingConfig, EmbeddingService
 
 
 class StubEmbeddings(Embeddings):

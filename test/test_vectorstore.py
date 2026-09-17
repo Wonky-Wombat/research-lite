@@ -7,8 +7,8 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from knowledge_lite.embedding import EmbeddedDocument
-from knowledge_lite.vectorstore import FaissVectorStore
+from research_lite.embedding import EmbeddedDocument
+from research_lite.vectorstore import FaissVectorStore
 
 pytest.importorskip("faiss")
 
