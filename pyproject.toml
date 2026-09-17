@@ -13,8 +13,6 @@ select = [
   "ANN",
 ]
 
-ignore = ["ANN101", "ANN102"]   #
-
 [tool.ruff.lint.per-file-ignores]
 "test/**" = ["ANN"]
 
