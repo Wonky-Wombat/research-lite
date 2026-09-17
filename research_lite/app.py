@@ -61,7 +61,7 @@ def ingest_and_embed(
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the KnowledgeLite RAG pipeline locally.")
+    parser = argparse.ArgumentParser(description="Run the ResearchLite RAG pipeline locally.")
     parser.add_argument("path", help="File or directory to ingest.")
     parser.add_argument(
         "--ext",
