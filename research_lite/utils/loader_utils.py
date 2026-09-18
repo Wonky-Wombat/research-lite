@@ -12,6 +12,15 @@ def _sha1(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    """Return a content hash without loading a potentially large file all at once."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while block := source.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def discover_files(path: str, extensions: Iterable[str]) -> list[Path]:
     """Discover supported files once, in a stable order, without cache directories."""
     base_path = Path(path)
@@ -47,6 +56,7 @@ def build_source_metadata(source_file: Path) -> dict[str, Any]:
     resolved_file = source_file.resolve()
     source_stat = resolved_file.stat()
     return {
+        "source_id": _sha256_file(resolved_file),
         "source_path": str(resolved_file),
         "title": source_file.stem,
         "ext": source_file.suffix.lstrip(".").lower(),
@@ -54,11 +64,16 @@ def build_source_metadata(source_file: Path) -> dict[str, Any]:
     }
 
 
-def populate_document_metadata(document: Document, source_metadata: dict[str, Any]) -> Document:
+def populate_document_metadata(
+    document: Document, source_metadata: dict[str, Any], *, source_unit_index: int
+) -> Document:
     """Populate standard metadata fields for a document."""
+    page = document.metadata.get("page")
+    source_unit = f"page-{page}" if page is not None else f"unit-{source_unit_index}"
     document.metadata.update(
         {
             "doc_id": _sha1(document.page_content.strip()),
+            "source_unit": source_unit,
             **source_metadata,
         }
     )
@@ -71,8 +86,10 @@ def load_text_by_ext(path: str, ext: str) -> list[Document]:
     for text_file in text_files:
         source_metadata = build_source_metadata(text_file)
         loader = TextLoader(str(text_file), encoding="utf-8")
-        for document in loader.load():
-            populate_document_metadata(document, source_metadata)
+        for source_unit_index, document in enumerate(loader.load()):
+            populate_document_metadata(
+                document, source_metadata, source_unit_index=source_unit_index
+            )
             documents.append(document)
 
     return documents

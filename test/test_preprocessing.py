@@ -42,6 +42,26 @@ def test_split_documents_generates_chunk_id_when_missing_doc_id() -> None:
         assert chunk.metadata["ext"] == "md"
 
 
+def test_split_documents_uses_source_provenance_for_chunk_ids() -> None:
+    doc = Document(
+        page_content="Evidence " * 20,
+        metadata={
+            "source_id": "source-sha256",
+            "source_unit": "page-4",
+            "doc_id": "legacy-document-id",
+            "ext": "pdf",
+        },
+    )
+    config = SplitConfig(chunk_size=30, chunk_overlap=0, separators=(" ",))
+
+    chunks = split_documents([doc], config=config)
+
+    assert chunks
+    assert [chunk.metadata["chunk_id"] for chunk in chunks] == [
+        f"source-sha256:page-4:{index}" for index in range(len(chunks))
+    ]
+
+
 def test_select_separators_prefers_ext_specific_config() -> None:
     config = SplitConfig(
         separators=("default",),

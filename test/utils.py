@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
@@ -56,3 +57,5 @@ def assert_metadata_matches_file(meta: Mapping[str, Any], source_file: Path) -> 
     assert Path(meta["source_path"]).resolve() == source_file.resolve()
     assert meta["ext"] == source_file.suffix.lstrip(".").lower()
     assert isinstance(meta["mtime"], (int | float))
+    assert meta["source_id"] == hashlib.sha256(source_file.read_bytes()).hexdigest()
+    assert meta["source_unit"] == "unit-0"

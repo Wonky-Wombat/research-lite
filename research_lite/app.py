@@ -109,7 +109,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-generation",
         action="store_true",
-        help="Skip LLM generation and only show retrieval results.",
+        help="Skip LLM generation and show scored retrieval evidence only.",
     )
     return parser
 
@@ -188,14 +188,24 @@ def main() -> None:
         else:
             print(f"Running similarity search for query: {args.query!r}")
             query_vector = service.embed_query(args.query)
-            results = vector_store.similarity_search(query_vector, k=max(1, args.top_k))
-            if not results:
+            scored_results = vector_store.similarity_search_with_score(
+                query_vector, k=max(1, args.top_k)
+            )
+            if not scored_results:
                 print("No results returned from FAISS.")
             else:
-                print(f"Found {len(results)} relevant chunks:")
-                for idx, doc in enumerate(results, start=1):
-                    preview = doc.page_content[:80].replace("\n", " ")
-                    print(f"[{idx}] {preview!r} metadata={doc.metadata}")
+                print(f"Found {len(scored_results)} relevant evidence chunks:")
+                results = [document for document, _ in scored_results]
+                for idx, (doc, score) in enumerate(scored_results, start=1):
+                    preview = doc.page_content[:240].replace("\n", " ")
+                    print(
+                        f"[{idx}] score={score:.6f} title={doc.metadata.get('title')!r} "
+                        f"source={doc.metadata.get('source_path')!r} "
+                        f"page_or_unit={doc.metadata.get('source_unit')!r} "
+                        f"chunk_id={doc.metadata.get('chunk_id')!r}\n"
+                        f"  excerpt={preview!r}\n"
+                        f"  metadata={doc.metadata}"
+                    )
 
                 if not args.no_generation:
                     print("\nGenerating answer...")

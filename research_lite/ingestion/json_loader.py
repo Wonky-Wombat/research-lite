@@ -14,11 +14,15 @@ def load_json(path: str) -> list[Document]:
     for json_file in json_files:
         source_metadata = build_source_metadata(json_file)
         loader = JSONLoader(file_path=str(json_file), jq_schema=".", text_content=False)
-        for document in loader.load():
+        for source_unit_index, document in enumerate(loader.load()):
             content = document.page_content
             if not isinstance(content, str):
                 content = json.dumps(content, ensure_ascii=False)
             normalized = Document(page_content=content, metadata=document.metadata)
-            documents.append(populate_document_metadata(normalized, source_metadata))
+            documents.append(
+                populate_document_metadata(
+                    normalized, source_metadata, source_unit_index=source_unit_index
+                )
+            )
 
     return documents

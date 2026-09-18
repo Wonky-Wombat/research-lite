@@ -73,14 +73,21 @@ def split_documents(
         if not splits:
             continue
         total_chunks = len(splits)
+        source_id = document.metadata.get("source_id")
+        source_unit = document.metadata.get("source_unit", "unit-0")
         parent_id = document.metadata.get("doc_id") or _sha1(cleaned_content.strip())
         for index, chunk in enumerate(splits):
+            chunk_id = (
+                f"{source_id}:{source_unit}:{index}"
+                if source_id is not None
+                else f"{parent_id}:{index}"
+            )
             metadata = {
                 **document.metadata,
                 **chunk.metadata,
                 "chunk_index": index,
                 "num_chunks": total_chunks,
-                "chunk_id": f"{parent_id}:{index}",
+                "chunk_id": chunk_id,
             }
             chunk.metadata = metadata
             chunked_docs.append(chunk)

@@ -12,7 +12,11 @@ def load_csv(path: str) -> list[Document]:
     for csv_file in csv_files:
         source_metadata = build_source_metadata(csv_file)
         loader = CSVLoader(file_path=str(csv_file), csv_args={"delimiter": ",", "quotechar": '"'})
-        for document in loader.load():
-            documents.append(populate_document_metadata(document, source_metadata))
+        for source_unit_index, document in enumerate(loader.load()):
+            documents.append(
+                populate_document_metadata(
+                    document, source_metadata, source_unit_index=source_unit_index
+                )
+            )
 
     return documents

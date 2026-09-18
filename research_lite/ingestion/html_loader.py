@@ -12,7 +12,11 @@ def load_html(path: str) -> list[Document]:
     for html_file in html_files:
         source_metadata = build_source_metadata(html_file)
         loader = UnstructuredHTMLLoader(str(html_file), mode="elements")
-        for document in loader.load():
-            documents.append(populate_document_metadata(document, source_metadata))
+        for source_unit_index, document in enumerate(loader.load()):
+            documents.append(
+                populate_document_metadata(
+                    document, source_metadata, source_unit_index=source_unit_index
+                )
+            )
 
     return documents

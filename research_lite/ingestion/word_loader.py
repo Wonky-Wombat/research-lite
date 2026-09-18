@@ -12,7 +12,11 @@ def load_word(path: str) -> list[Document]:
     for word_file in word_files:
         source_metadata = build_source_metadata(word_file)
         loader = Docx2txtLoader(str(word_file))
-        for document in loader.load():
-            documents.append(populate_document_metadata(document, source_metadata))
+        for source_unit_index, document in enumerate(loader.load()):
+            documents.append(
+                populate_document_metadata(
+                    document, source_metadata, source_unit_index=source_unit_index
+                )
+            )
 
     return documents
