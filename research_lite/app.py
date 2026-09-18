@@ -16,7 +16,7 @@ from research_lite.embedding.embedding_builder import (
     build_default_embedding_service,
 )
 from research_lite.generation import RAGGenerator
-from research_lite.ingestion import load_documents
+from research_lite.ingestion import IngestReport, load_documents
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.vectorstore import FaissVectorStore
 
@@ -30,9 +30,10 @@ def ingest_and_embed(
     model_name: str = DEFAULT_MODEL_NAME,
     device: str = "cpu",
     batch_size: int = 32,
+    ingest_report: IngestReport | None = None,
 ) -> tuple[list[EmbeddedDocument], FaissVectorStore | None, EmbeddingService | None]:
     """Run the load -> split -> embed pipeline for the provided path."""
-    documents = load_documents(path, extensions=extensions)
+    documents = load_documents(path, extensions=extensions, report=ingest_report)
     if not documents:
         return [], None, embedding_service
 
@@ -147,6 +148,7 @@ def main() -> None:
         except ImportError as exc:
             raise RuntimeError("FAISS is required to load a index.") from exc
     else:
+        ingest_report = IngestReport()
         embedded, vector_store, service = ingest_and_embed(
             args.path,
             extensions=args.extensions,
@@ -154,11 +156,20 @@ def main() -> None:
             model_name=args.model_name,
             device=args.device,
             batch_size=args.batch_size,
+            ingest_report=ingest_report,
         )
         print(
             f"Ingested path '{args.path}' with {len(embedded)} embedded chunks "
             f"using model '{args.model_name}'."
         )
+        print(
+            "Ingest report: "
+            f"discovered={ingest_report.discovered_files}, "
+            f"processed={ingest_report.processed_files}, "
+            f"failed={ingest_report.failed_files}."
+        )
+        for failure in ingest_report.failures:
+            print(f"  Failed: {failure.source_path}: {failure.reason}")
         if vector_store is not None:
             print("Built FAISS vector store with the embedded chunks.")
         if args.save_index:

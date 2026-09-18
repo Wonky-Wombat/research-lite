@@ -12,7 +12,7 @@ import research_lite.ingestion.html_loader as html_loader_module
 import research_lite.ingestion.json_loader as json_loader_module
 import research_lite.ingestion.pdf_loader as pdf_loader_module
 import research_lite.ingestion.word_loader as word_loader_module
-from research_lite.ingestion import load_documents
+from research_lite.ingestion import load_documents, load_documents_with_report
 from research_lite.ingestion.csv_loader import load_csv
 from research_lite.ingestion.excel_loader import load_excel
 from research_lite.ingestion.html_loader import load_html
@@ -224,9 +224,51 @@ def test_load_documents_dispatches_selected_extensions(
     fake_loaders = {ext: make_loader(ext) for ext in ("txt", "md")}
     monkeypatch.setattr(ingestion_module, "_LOADER_BY_EXT", fake_loaders)
 
+    (tmp_path / "z.txt").write_text("z", encoding="utf-8")
+    (tmp_path / "a.md").write_text("a", encoding="utf-8")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.txt").write_text("b", encoding="utf-8")
+
     docs = load_documents(str(tmp_path), extensions=["txt", "md"])
-    assert called == [("txt", str(tmp_path)), ("md", str(tmp_path))]
-    assert [doc.metadata["ext"] for doc in docs] == ["txt", "md"]
+    assert called == [
+        ("md", str(tmp_path / "a.md")),
+        ("txt", str(nested / "b.txt")),
+        ("txt", str(tmp_path / "z.txt")),
+    ]
+    assert [doc.metadata["ext"] for doc in docs] == ["md", "txt", "txt"]
+
+
+def test_load_documents_skips_hidden_directories_and_isolates_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "good.txt").write_text("good", encoding="utf-8")
+    (tmp_path / "broken.md").write_text("broken", encoding="utf-8")
+    hidden = tmp_path / ".researchlite"
+    hidden.mkdir()
+    (hidden / "ignored.txt").write_text("ignored", encoding="utf-8")
+
+    def load_text_file(path: str) -> list[Document]:
+        return [Document(page_content="good", metadata={"source": path})]
+
+    def fail_markdown_file(path: str) -> list[Document]:
+        raise RuntimeError(f"cannot parse {Path(path).name}")
+
+    monkeypatch.setattr(
+        ingestion_module,
+        "_LOADER_BY_EXT",
+        {"txt": load_text_file, "md": fail_markdown_file},
+    )
+
+    docs, report = load_documents_with_report(str(tmp_path))
+
+    assert [doc.page_content for doc in docs] == ["good"]
+    assert report.discovered_files == 2
+    assert report.processed_files == 1
+    assert report.loaded_documents == 1
+    assert report.failed_files == 1
+    assert report.failures[0].source_path.endswith("broken.md")
+    assert report.failures[0].reason == "cannot parse broken.md"
 
 
 def test_load_documents_rejects_unknown_extensions(tmp_path: Path) -> None:

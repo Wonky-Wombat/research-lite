@@ -3,7 +3,7 @@ import json
 from langchain_community.document_loaders import JSONLoader
 from langchain_core.documents import Document
 
-from ..utils.loader_utils import iter_files, populate_document_metadata
+from ..utils.loader_utils import build_source_metadata, iter_files, populate_document_metadata
 
 
 def load_json(path: str) -> list[Document]:
@@ -12,12 +12,13 @@ def load_json(path: str) -> list[Document]:
 
     documents: list[Document] = []
     for json_file in json_files:
+        source_metadata = build_source_metadata(json_file)
         loader = JSONLoader(file_path=str(json_file), jq_schema=".", text_content=False)
         for document in loader.load():
             content = document.page_content
             if not isinstance(content, str):
                 content = json.dumps(content, ensure_ascii=False)
             normalized = Document(page_content=content, metadata=document.metadata)
-            documents.append(populate_document_metadata(normalized, json_file))
+            documents.append(populate_document_metadata(normalized, source_metadata))
 
     return documents

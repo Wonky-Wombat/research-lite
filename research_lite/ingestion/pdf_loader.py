@@ -1,7 +1,7 @@
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 
-from ..utils.loader_utils import iter_files, populate_document_metadata
+from ..utils.loader_utils import build_source_metadata, iter_files, populate_document_metadata
 
 
 def load_pdf(path: str) -> list[Document]:
@@ -10,8 +10,9 @@ def load_pdf(path: str) -> list[Document]:
 
     documents: list[Document] = []
     for pdf_file in pdf_files:
+        source_metadata = build_source_metadata(pdf_file)
         loader = PyPDFLoader(str(pdf_file))
         for document in loader.load():
-            documents.append(populate_document_metadata(document, pdf_file))
+            documents.append(populate_document_metadata(document, source_metadata))
 
     return documents

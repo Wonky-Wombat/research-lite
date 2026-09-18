@@ -1,7 +1,7 @@
 from langchain_community.document_loaders import UnstructuredHTMLLoader
 from langchain_core.documents import Document
 
-from ..utils.loader_utils import iter_files, populate_document_metadata
+from ..utils.loader_utils import build_source_metadata, iter_files, populate_document_metadata
 
 
 def load_html(path: str) -> list[Document]:
@@ -10,8 +10,9 @@ def load_html(path: str) -> list[Document]:
 
     documents: list[Document] = []
     for html_file in html_files:
+        source_metadata = build_source_metadata(html_file)
         loader = UnstructuredHTMLLoader(str(html_file), mode="elements")
         for document in loader.load():
-            documents.append(populate_document_metadata(document, html_file))
+            documents.append(populate_document_metadata(document, source_metadata))
 
     return documents
