@@ -10,13 +10,14 @@ def build_default_embedding_service(
     *,
     device: str = "cpu",
     batch_size: int = 32,
+    local_files_only: bool = False,
 ) -> EmbeddingService:
     """Construct the project's default embedding service."""
     from langchain_huggingface import HuggingFaceEmbeddings
 
     backend = HuggingFaceEmbeddings(
         model_name=model_name,
-        model_kwargs={"device": device},
+        model_kwargs={"device": device, "local_files_only": local_files_only},
     )
     return EmbeddingService(backend, EmbeddingConfig(batch_size=batch_size))
 
