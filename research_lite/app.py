@@ -17,6 +17,7 @@ from research_lite.embedding.embedding_builder import (
 )
 from research_lite.generation import RAGGenerator
 from research_lite.ingestion import IngestReport, load_documents
+from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.retrieval import (
     DEFAULT_RERANKER_MODEL,
@@ -89,6 +90,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--chunk-overlap", type=int, default=200)
+    parser.add_argument(
+        "--init-library",
+        action="store_true",
+        help="Initialize a local .researchlite manifest without ingesting documents.",
+    )
+    parser.add_argument(
+        "--library-dir",
+        help="Directory that owns .researchlite.",
+    )
     parser.add_argument(
         "--save-index", help="Directory to save the built FAISS index (if available)."
     )
@@ -177,6 +187,21 @@ def main() -> None:
     args = parser.parse_args()
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
+
+    if args.init_library:
+        library_root = resolve_library_root(args.path, args.library_dir)
+        manifest = IngestionManifest.initialize(
+            library_root,
+            current_config_fingerprint=config_fingerprint(
+                model_name=args.model_name,
+                split_config=split_config,
+            ),
+        )
+        try:
+            print(f"Initialized ResearchLite library manifest at '{manifest.state_dir}'.")
+        finally:
+            manifest.close()
+        return
 
     embedded: list[EmbeddedDocument] = []
     vector_store: FaissVectorStore | None = None

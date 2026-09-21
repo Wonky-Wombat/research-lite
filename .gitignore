@@ -219,6 +219,7 @@ test/
 
 # Local Data & Indexes
 indexes/
+.researchlite/
 
 # Local experiment data and one-off evaluation scripts are not versioned yet.
 data/
