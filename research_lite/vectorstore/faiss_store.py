@@ -69,6 +69,19 @@ class FaissVectorStore:
         ids: list[str] = self._index.add_embeddings(text_embeddings, metadatas=metadatas)
         return ids
 
+    def documents(self) -> list[Document]:
+        """Return the documents persisted in this FAISS store in index order."""
+        documents: list[Document] = []
+        for index in sorted(self._index.index_to_docstore_id):
+            document_id = self._index.index_to_docstore_id[index]
+            document = self._index.docstore.search(document_id)
+            if isinstance(document, Document):
+                documents.append(document)
+            else:
+                msg = f"FAISS docstore entry {document_id!r} is not a document."
+                raise ValueError(msg)
+        return documents
+
     def similarity_search(
         self,
         query_vector: Sequence[float],
