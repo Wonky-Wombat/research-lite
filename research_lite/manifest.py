@@ -86,10 +86,7 @@ class IngestionManifest:
         """Create or open a manifest without loading sources or FAISS."""
         state_dir = library_root.expanduser().resolve() / ".researchlite"
         state_dir.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(state_dir / "manifest.sqlite")
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
+        connection = _connect(state_dir / "manifest.sqlite")
         connection.executescript(SCHEMA)
 
         connection.execute(
@@ -109,6 +106,31 @@ class IngestionManifest:
         connection.commit()
         return cls(state_dir, connection)
 
+    @classmethod
+    def open(cls, library_root: Path) -> IngestionManifest:
+        """Open an existing manifest without changing its recorded state."""
+        state_dir = library_root.expanduser().resolve() / ".researchlite"
+        database_path = state_dir / "manifest.sqlite"
+        if not database_path.is_file():
+            msg = f"No ResearchLite manifest found at {database_path}. Run --init-library first."
+            raise FileNotFoundError(msg)
+
+        connection = _connect(database_path)
+        try:
+            schema_version = connection.execute(
+                "SELECT value FROM library_state WHERE key = 'schema_version'"
+            ).fetchone()
+            if schema_version is None:
+                msg = f"Manifest at {database_path} has no schema version."
+                raise RuntimeError(msg)
+            if str(schema_version["value"]) != SCHEMA_VERSION:
+                msg = f"Unsupported manifest schema version at {database_path}."
+                raise RuntimeError(msg)
+        except Exception:
+            connection.close()
+            raise
+        return cls(state_dir, connection)
+
     def close(self) -> None:
         """Close the underlying SQLite connection."""
         self._connection.close()
@@ -121,6 +143,18 @@ class IngestionManifest:
             (_canonical_path(path),),
         ).fetchone()
         return _source_record(row) if row is not None else None
+
+    def list_sources(self) -> list[SourceRecord]:
+        """Return all source records in stable path order."""
+        rows = self._connection.execute(
+            """
+            SELECT canonical_path, source_id, config_fingerprint,
+                   status, error_message, updated_at
+            FROM sources
+            ORDER BY canonical_path
+            """
+        ).fetchall()
+        return [_source_record(row) for row in rows]
 
     def upsert_source(
         self,
@@ -166,6 +200,14 @@ class IngestionManifest:
 
 def _canonical_path(path: str | Path) -> str:
     return str(Path(path).expanduser().resolve())
+
+
+def _connect(database_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA journal_mode = WAL")
+    return connection
 
 
 def _source_record(row: sqlite3.Row) -> SourceRecord:
