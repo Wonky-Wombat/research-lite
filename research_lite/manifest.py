@@ -1,3 +1,10 @@
+#
+# manifest.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 """SQLite-backed state for a local ResearchLite document library."""
 
 from __future__ import annotations

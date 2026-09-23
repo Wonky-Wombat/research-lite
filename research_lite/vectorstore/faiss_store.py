@@ -1,3 +1,10 @@
+#
+# faiss_store.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence

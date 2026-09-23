@@ -1,3 +1,10 @@
+#
+# retrieval.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 """Composable dense, hybrid, and reranked retrieval for ResearchLite."""
 
 from __future__ import annotations

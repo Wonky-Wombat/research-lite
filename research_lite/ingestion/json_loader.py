@@ -1,3 +1,10 @@
+#
+# json_loader.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 import json
 
 from langchain_community.document_loaders import JSONLoader

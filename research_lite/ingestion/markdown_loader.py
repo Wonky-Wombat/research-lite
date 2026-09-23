@@ -1,3 +1,10 @@
+#
+# markdown_loader.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 from langchain_core.documents import Document
 
 from ..utils.loader_utils import load_text_by_ext

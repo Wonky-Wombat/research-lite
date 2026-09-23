@@ -1,3 +1,10 @@
+#
+# loader_utils.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 import hashlib
 import os
 from collections.abc import Iterable

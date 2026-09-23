@@ -1,3 +1,10 @@
+#
+# refresh_plan.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-09-22.
+#
+
 """Plan safe incremental updates for a ResearchLite document library."""
 
 from __future__ import annotations
