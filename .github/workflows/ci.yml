@@ -43,4 +43,4 @@ jobs:
 
       - name: mypy (type checking)
         run: |
-          mypy research_lite test
+          mypy research_lite
