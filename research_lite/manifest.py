@@ -197,6 +197,22 @@ class IngestionManifest:
         )
         self._connection.commit()
 
+    def remove_source(self, path: str | Path) -> None:
+        """Remove a source record after its indexed chunks have been removed."""
+        self._connection.execute(
+            "DELETE FROM sources WHERE canonical_path = ?", (_canonical_path(path),)
+        )
+        self._connection.commit()
+
+    def set_state_value(self, key: str, value: str) -> None:
+        """Store a manifest-wide state value."""
+        self._connection.execute(
+            "INSERT INTO library_state(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        self._connection.commit()
+
     def state_value(self, key: str) -> str | None:
         """Return a manifest-wide state value, if present."""
         row = self._connection.execute(

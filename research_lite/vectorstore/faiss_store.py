@@ -76,6 +76,22 @@ class FaissVectorStore:
         ids: list[str] = self._index.add_embeddings(text_embeddings, metadatas=metadatas)
         return ids
 
+    def delete_by_source_paths(self, source_paths: Iterable[str | Path]) -> int:
+        """Delete every chunk whose canonical source path is in ``source_paths``."""
+        canonical_paths = {str(Path(path).expanduser().resolve()) for path in source_paths}
+        document_ids: list[str] = []
+        for _index, document_id in self._index.index_to_docstore_id.items():
+            document = self._index.docstore.search(document_id)
+            if not isinstance(document, Document):
+                msg = f"FAISS docstore entry {document_id!r} is not a document."
+                raise ValueError(msg)
+            source_path = document.metadata.get("source_path")
+            if source_path is not None and str(Path(str(source_path)).resolve()) in canonical_paths:
+                document_ids.append(document_id)
+        if document_ids:
+            self._index.delete(document_ids)
+        return len(document_ids)
+
     def documents(self) -> list[Document]:
         """Return the documents persisted in this FAISS store in index order."""
         documents: list[Document] = []

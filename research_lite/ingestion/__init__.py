@@ -36,6 +36,8 @@ _LOADER_BY_EXT: dict[str, Callable[[str], list[Document]]] = {
     "json": load_json,
 }
 
+SUPPORTED_EXTENSIONS = tuple(_LOADER_BY_EXT)
+
 
 @dataclass(frozen=True)
 class IngestFailure:
@@ -63,7 +65,7 @@ def _normalize_extensions(extensions: Iterable[str] | None) -> list[str]:
     normalized_exts = (
         [ext.lower().lstrip(".") for ext in extensions]
         if extensions is not None
-        else list(_LOADER_BY_EXT)
+        else list(SUPPORTED_EXTENSIONS)
     )
     if not normalized_exts:
         raise ValueError("Argument 'extensions' cannot be empty.")
@@ -119,4 +121,10 @@ def load_documents(
     return documents
 
 
-__all__ = ["IngestFailure", "IngestReport", "load_documents", "load_documents_with_report"]
+__all__ = [
+    "IngestFailure",
+    "IngestReport",
+    "SUPPORTED_EXTENSIONS",
+    "load_documents",
+    "load_documents_with_report",
+]

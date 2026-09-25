@@ -24,6 +24,7 @@ from research_lite.embedding.embedding_builder import (
 )
 from research_lite.generation import RAGGenerator
 from research_lite.ingestion import IngestReport, load_documents
+from research_lite.library_refresh import refresh_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.retrieval import (
@@ -97,10 +98,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--chunk-overlap", type=int, default=200)
-    parser.add_argument(
+    library_commands = parser.add_mutually_exclusive_group()
+    library_commands.add_argument(
         "--init-library",
         action="store_true",
         help="Initialize a local .researchlite manifest without ingesting documents.",
+    )
+    library_commands.add_argument(
+        "--refresh-library",
+        action="store_true",
+        help="Incrementally synchronize a library's .researchlite FAISS index and manifest.",
     )
     parser.add_argument(
         "--library-dir",
@@ -208,6 +215,43 @@ def main() -> None:
             print(f"Initialized ResearchLite library manifest at '{manifest.state_dir}'.")
         finally:
             manifest.close()
+        return
+
+    if args.refresh_library:
+        library_root = resolve_library_root(args.path, args.library_dir)
+        refresh_service = build_default_embedding_service(
+            model_name=args.model_name,
+            device=args.device,
+            batch_size=args.batch_size,
+            local_files_only=args.local_files_only,
+        )
+        result = refresh_library(
+            library_root,
+            current_config_fingerprint=config_fingerprint(
+                model_name=args.model_name,
+                split_config=split_config,
+            ),
+            embedding_service=refresh_service,
+            split_config=split_config,
+            extensions=args.extensions,
+            index_name=args.index_name,
+        )
+        plan = result.plan
+        print(
+            "Refresh plan: "
+            f"new={len(plan.new)}, changed={len(plan.changed)}, "
+            f"unchanged={len(plan.unchanged)}, deleted={len(plan.deleted)}, "
+            f"inspection_failed={len(plan.failed)}."
+        )
+        print(
+            "Refresh result: "
+            f"indexed={len(result.indexed_sources)}, failed={len(result.failed_sources)}, "
+            f"deleted_chunks={result.deleted_chunks}, added_chunks={result.added_chunks}."
+        )
+        for refresh_failure in plan.failed:
+            print(f"  Inspection failed: {refresh_failure.path}: {refresh_failure.reason}")
+        for source_file in result.failed_sources:
+            print(f"  Refresh failed: {source_file}")
         return
 
     embedded: list[EmbeddedDocument] = []
