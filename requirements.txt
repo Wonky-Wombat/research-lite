@@ -1,5 +1,6 @@
 torch
 faiss-cpu
+filelock
 langchain
 langchain-community
 langchain-text-splitters

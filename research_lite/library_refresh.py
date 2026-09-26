@@ -14,6 +14,8 @@ from pathlib import Path
 
 from research_lite.embedding import EmbeddedDocument, EmbeddingService
 from research_lite.ingestion import SUPPORTED_EXTENSIONS, IngestReport, load_documents
+from research_lite.library_backup import RefreshBackup
+from research_lite.library_lock import acquire_refresh_lock
 from research_lite.manifest import IngestionManifest
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.refresh_plan import RefreshPlan, plan_library_refresh
@@ -35,6 +37,39 @@ class RefreshResult:
 
 
 def refresh_library(
+    library_root: Path,
+    *,
+    current_config_fingerprint: str,
+    embedding_service: EmbeddingService,
+    split_config: SplitConfig,
+    extensions: list[str] | None = None,
+    index_name: str = DEFAULT_INDEX_NAME,
+) -> RefreshResult:
+    """Synchronize a library while holding an exclusive refresh lock."""
+    root = library_root.expanduser().resolve()
+    state_dir = root / ".researchlite"
+    preflight_manifest = IngestionManifest.open(root)
+    preflight_manifest.close()
+    with acquire_refresh_lock(state_dir):
+        RefreshBackup.recover_interrupted_refresh(state_dir)
+        backup = RefreshBackup.create(state_dir)
+        try:
+            result = _refresh_library(
+                root,
+                current_config_fingerprint=current_config_fingerprint,
+                embedding_service=embedding_service,
+                split_config=split_config,
+                extensions=extensions,
+                index_name=index_name,
+            )
+        except BaseException:
+            backup.restore()
+            raise
+        backup.complete()
+        return result
+
+
+def _refresh_library(
     library_root: Path,
     *,
     current_config_fingerprint: str,

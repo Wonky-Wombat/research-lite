@@ -24,6 +24,7 @@ from research_lite.embedding.embedding_builder import (
 )
 from research_lite.generation import RAGGenerator
 from research_lite.ingestion import IngestReport, load_documents
+from research_lite.library_lock import LibraryRefreshLockedError
 from research_lite.library_refresh import refresh_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
@@ -225,17 +226,20 @@ def main() -> None:
             batch_size=args.batch_size,
             local_files_only=args.local_files_only,
         )
-        result = refresh_library(
-            library_root,
-            current_config_fingerprint=config_fingerprint(
-                model_name=args.model_name,
+        try:
+            result = refresh_library(
+                library_root,
+                current_config_fingerprint=config_fingerprint(
+                    model_name=args.model_name,
+                    split_config=split_config,
+                ),
+                embedding_service=refresh_service,
                 split_config=split_config,
-            ),
-            embedding_service=refresh_service,
-            split_config=split_config,
-            extensions=args.extensions,
-            index_name=args.index_name,
-        )
+                extensions=args.extensions,
+                index_name=args.index_name,
+            )
+        except LibraryRefreshLockedError as exc:
+            parser.error(str(exc))
         plan = result.plan
         print(
             "Refresh plan: "
