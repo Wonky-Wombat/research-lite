@@ -67,20 +67,21 @@ def refresh_library(
         existing_records = manifest.list_sources()
         index_path = manifest.state_dir / f"{index_name}.faiss"
         vector_store: FaissVectorStore | None = None
-        if any(record.status == "indexed" for record in existing_records):
-            if not index_path.is_file():
-                msg = f"Missing FAISS index at {index_path}; cannot safely refresh this library."
-                raise FileNotFoundError(msg)
+        if index_path.is_file():
             vector_store = FaissVectorStore.load(
                 manifest.state_dir,
                 embedding_backend=embedding_service.backend,
                 index_name=index_name,
                 allow_dangerous_deserialization=True,
             )
+        elif any(record.has_indexed_content for record in existing_records):
+            msg = f"Missing FAISS index at {index_path}; cannot safely refresh this library."
+            raise FileNotFoundError(msg)
 
         replacements: list[EmbeddedDocument] = []
         successful_changed: list[Path] = []
         successful_sources: list[tuple[Path, str]] = []
+        failed_source_messages: list[tuple[Path, str]] = []
         for source_file in pending_sources:
             report = IngestReport()
             try:
@@ -95,8 +96,9 @@ def refresh_library(
                 successful_sources.append((source_file, source_id))
                 if source_file in plan.changed:
                     successful_changed.append(source_file)
-            except Exception:
+            except Exception as exc:
                 result.failed_sources.append(source_file)
+                failed_source_messages.append((source_file, str(exc)))
 
         removal_paths = [*plan.deleted, *successful_changed]
         if vector_store is not None and removal_paths:
@@ -116,23 +118,21 @@ def refresh_library(
         for source_file in plan.deleted:
             manifest.remove_source(source_file)
         for source_file, source_id in successful_sources:
-            manifest.upsert_source(
+            manifest.record_indexed_source(
                 path=source_file,
                 source_id=source_id,
                 config_fingerprint=current_config_fingerprint,
             )
             result.indexed_sources.append(source_file)
-        for source_file in result.failed_sources:
+        for source_file, error_message in failed_source_messages:
             try:
-                source_id = build_source_metadata(source_file)["source_id"]
+                source_id = str(build_source_metadata(source_file)["source_id"])
             except OSError:
-                continue
-            manifest.upsert_source(
+                source_id = None
+            manifest.record_refresh_failure(
                 path=source_file,
                 source_id=source_id,
-                config_fingerprint=current_config_fingerprint,
-                status="failed",
-                error_message="Could not load, split, or embed this source during refresh.",
+                error_message=error_message or "Could not load, split, or embed this source.",
             )
 
         if plan.configuration_changed and not result.failed_sources and not plan.failed:

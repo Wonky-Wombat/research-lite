@@ -18,7 +18,7 @@ from pathlib import Path
 
 from research_lite.preprocessing import SplitConfig
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_state (
@@ -28,11 +28,21 @@ CREATE TABLE IF NOT EXISTS library_state (
 
 CREATE TABLE IF NOT EXISTS sources (
     canonical_path TEXT PRIMARY KEY,
-    source_id TEXT NOT NULL,
-    config_fingerprint TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('indexed', 'failed', 'pending')),
-    error_message TEXT,
-    updated_at TEXT NOT NULL
+    indexed_source_id TEXT,
+    indexed_config_fingerprint TEXT,
+    indexed_at TEXT,
+    last_attempt_source_id TEXT,
+    last_attempt_at TEXT NOT NULL,
+    last_refresh_error TEXT,
+    CHECK (
+        (indexed_source_id IS NULL
+         AND indexed_config_fingerprint IS NULL
+         AND indexed_at IS NULL)
+        OR
+        (indexed_source_id IS NOT NULL
+         AND indexed_config_fingerprint IS NOT NULL
+         AND indexed_at IS NOT NULL)
+    )
 );
 """
 
@@ -42,11 +52,17 @@ class SourceRecord:
     """The manifest's file-level record for one library source."""
 
     canonical_path: str
-    source_id: str
-    config_fingerprint: str
-    status: str
-    error_message: str | None
-    updated_at: str
+    indexed_source_id: str | None
+    indexed_config_fingerprint: str | None
+    indexed_at: str | None
+    last_attempt_source_id: str | None
+    last_attempt_at: str
+    last_refresh_error: str | None
+
+    @property
+    def has_indexed_content(self) -> bool:
+        """Whether this source still has a successfully indexed version."""
+        return self.indexed_source_id is not None
 
 
 def config_fingerprint(*, model_name: str, split_config: SplitConfig) -> str:
@@ -94,6 +110,14 @@ class IngestionManifest:
         state_dir = library_root.expanduser().resolve() / ".researchlite"
         state_dir.mkdir(parents=True, exist_ok=True)
         connection = _connect(state_dir / "manifest.sqlite")
+        existing_schema_version = _stored_schema_version(connection)
+        if existing_schema_version is not None and existing_schema_version != SCHEMA_VERSION:
+            connection.close()
+            msg = (
+                f"Manifest at {state_dir} uses schema version {existing_schema_version}. "
+                "Delete .researchlite and run --init-library again."
+            )
+            raise RuntimeError(msg)
         connection.executescript(SCHEMA)
 
         connection.execute(
@@ -131,7 +155,10 @@ class IngestionManifest:
                 msg = f"Manifest at {database_path} has no schema version."
                 raise RuntimeError(msg)
             if str(schema_version["value"]) != SCHEMA_VERSION:
-                msg = f"Unsupported manifest schema version at {database_path}."
+                msg = (
+                    f"Unsupported manifest schema version at {database_path}. "
+                    "Delete .researchlite and run --init-library again."
+                )
                 raise RuntimeError(msg)
         except Exception:
             connection.close()
@@ -145,8 +172,9 @@ class IngestionManifest:
     def get_source(self, path: str | Path) -> SourceRecord | None:
         """Return the existing record for a source path, if any."""
         row = self._connection.execute(
-            "SELECT canonical_path, source_id, config_fingerprint, status, "
-            "error_message, updated_at FROM sources WHERE canonical_path = ?",
+            "SELECT canonical_path, indexed_source_id, indexed_config_fingerprint, "
+            "indexed_at, last_attempt_source_id, last_attempt_at, last_refresh_error "
+            "FROM sources WHERE canonical_path = ?",
             (_canonical_path(path),),
         ).fetchone()
         return _source_record(row) if row is not None else None
@@ -155,45 +183,65 @@ class IngestionManifest:
         """Return all source records in stable path order."""
         rows = self._connection.execute(
             """
-            SELECT canonical_path, source_id, config_fingerprint,
-                   status, error_message, updated_at
+            SELECT canonical_path, indexed_source_id, indexed_config_fingerprint,
+                   indexed_at, last_attempt_source_id, last_attempt_at, last_refresh_error
             FROM sources
             ORDER BY canonical_path
             """
         ).fetchall()
         return [_source_record(row) for row in rows]
 
-    def upsert_source(
+    def record_indexed_source(
         self,
         *,
         path: str | Path,
         source_id: str,
         config_fingerprint: str,
-        status: str = "indexed",
-        error_message: str | None = None,
     ) -> None:
-        """Store the latest file-level state for an indexed source."""
-        if status not in {"indexed", "failed", "pending"}:
-            msg = f"Unsupported source status: {status}."
-            raise ValueError(msg)
+        """Record a source whose current version was successfully indexed."""
+        now = _utc_now()
         self._connection.execute(
             "INSERT INTO sources("
-            "canonical_path, source_id, config_fingerprint, status, error_message, updated_at"
-            ") VALUES (?, ?, ?, ?, ?, ?) "
+            "canonical_path, indexed_source_id, indexed_config_fingerprint, indexed_at, "
+            "last_attempt_source_id, last_attempt_at, last_refresh_error"
+            ") VALUES (?, ?, ?, ?, ?, ?, NULL) "
             "ON CONFLICT(canonical_path) DO UPDATE SET "
-            "source_id = excluded.source_id, "
-            "config_fingerprint = excluded.config_fingerprint, "
-            "status = excluded.status, "
-            "error_message = excluded.error_message, "
-            "updated_at = excluded.updated_at",
+            "indexed_source_id = excluded.indexed_source_id, "
+            "indexed_config_fingerprint = excluded.indexed_config_fingerprint, "
+            "indexed_at = excluded.indexed_at, "
+            "last_attempt_source_id = excluded.last_attempt_source_id, "
+            "last_attempt_at = excluded.last_attempt_at, "
+            "last_refresh_error = NULL",
             (
                 _canonical_path(path),
                 source_id,
                 config_fingerprint,
-                status,
-                error_message,
-                _utc_now(),
+                now,
+                source_id,
+                now,
             ),
+        )
+        self._connection.commit()
+
+    def record_refresh_failure(
+        self,
+        *,
+        path: str | Path,
+        source_id: str | None,
+        error_message: str,
+    ) -> None:
+        """Record a failed refresh without replacing a prior indexed version."""
+        now = _utc_now()
+        self._connection.execute(
+            "INSERT INTO sources("
+            "canonical_path, indexed_source_id, indexed_config_fingerprint, indexed_at, "
+            "last_attempt_source_id, last_attempt_at, last_refresh_error"
+            ") VALUES (?, NULL, NULL, NULL, ?, ?, ?) "
+            "ON CONFLICT(canonical_path) DO UPDATE SET "
+            "last_attempt_source_id = excluded.last_attempt_source_id, "
+            "last_attempt_at = excluded.last_attempt_at, "
+            "last_refresh_error = excluded.last_refresh_error",
+            (_canonical_path(path), source_id, now, error_message),
         )
         self._connection.commit()
 
@@ -225,6 +273,18 @@ def _canonical_path(path: str | Path) -> str:
     return str(Path(path).expanduser().resolve())
 
 
+def _stored_schema_version(connection: sqlite3.Connection) -> str | None:
+    table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'library_state'"
+    ).fetchone()
+    if table is None:
+        return None
+    row = connection.execute(
+        "SELECT value FROM library_state WHERE key = 'schema_version'"
+    ).fetchone()
+    return str(row["value"]) if row is not None else None
+
+
 def _connect(database_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
@@ -236,11 +296,24 @@ def _connect(database_path: Path) -> sqlite3.Connection:
 def _source_record(row: sqlite3.Row) -> SourceRecord:
     return SourceRecord(
         canonical_path=str(row["canonical_path"]),
-        source_id=str(row["source_id"]),
-        config_fingerprint=str(row["config_fingerprint"]),
-        status=str(row["status"]),
-        error_message=str(row["error_message"]) if row["error_message"] is not None else None,
-        updated_at=str(row["updated_at"]),
+        indexed_source_id=(
+            str(row["indexed_source_id"]) if row["indexed_source_id"] is not None else None
+        ),
+        indexed_config_fingerprint=(
+            str(row["indexed_config_fingerprint"])
+            if row["indexed_config_fingerprint"] is not None
+            else None
+        ),
+        indexed_at=str(row["indexed_at"]) if row["indexed_at"] is not None else None,
+        last_attempt_source_id=(
+            str(row["last_attempt_source_id"])
+            if row["last_attempt_source_id"] is not None
+            else None
+        ),
+        last_attempt_at=str(row["last_attempt_at"]),
+        last_refresh_error=(
+            str(row["last_refresh_error"]) if row["last_refresh_error"] is not None else None
+        ),
     )
 
 

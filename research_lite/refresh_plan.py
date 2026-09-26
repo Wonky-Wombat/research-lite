@@ -72,9 +72,11 @@ def plan_library_refresh(
         previous = recorded_sources.get(canonical_path)
         if previous is None:
             plan.new.append(source_file)
-        elif configuration_changed or previous.source_id != source_metadata["source_id"]:
-            plan.changed.append(source_file)
-        elif previous.status != "indexed":
+        elif (
+            configuration_changed
+            or previous.indexed_source_id != source_metadata["source_id"]
+            or previous.last_refresh_error is not None
+        ):
             plan.changed.append(source_file)
         else:
             plan.unchanged.append(source_file)
