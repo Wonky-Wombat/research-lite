@@ -51,6 +51,7 @@ def plan_library_refresh(
 ) -> RefreshPlan:
     """Compare source files with a manifest without changing either index or manifest."""
     root = library_root.expanduser().resolve()
+    normalized_extensions = {extension.lower().lstrip(".") for extension in extensions}
     recorded_sources = {record.canonical_path: record for record in manifest.list_sources()}
     recorded_fingerprint = manifest.state_value("config_fingerprint")
     configuration_changed = (
@@ -59,7 +60,7 @@ def plan_library_refresh(
     plan = RefreshPlan(configuration_changed=configuration_changed)
     seen_paths: set[str] = set()
 
-    for source_file in discover_files(str(root), extensions):
+    for source_file in discover_files(str(root), normalized_extensions):
         canonical_path = str(source_file.resolve())
         seen_paths.add(canonical_path)
         try:
@@ -78,5 +79,9 @@ def plan_library_refresh(
         else:
             plan.unchanged.append(source_file)
 
-    plan.deleted.extend(Path(path) for path in sorted(set(recorded_sources).difference(seen_paths)))
+    plan.deleted.extend(
+        Path(path)
+        for path in sorted(set(recorded_sources).difference(seen_paths))
+        if Path(path).suffix.lower().lstrip(".") in normalized_extensions
+    )
     return plan

@@ -65,7 +65,7 @@ def _normalize_extensions(extensions: Iterable[str] | None) -> list[str]:
     normalized_exts = (
         [ext.lower().lstrip(".") for ext in extensions]
         if extensions is not None
-        else list(SUPPORTED_EXTENSIONS)
+        else list(_LOADER_BY_EXT)
     )
     if not normalized_exts:
         raise ValueError("Argument 'extensions' cannot be empty.")
