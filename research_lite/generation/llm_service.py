@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
@@ -21,6 +24,16 @@ except ImportError:
 
 from langchain_openai import ChatOpenAI
 
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:  # pragma: no cover - exercised only in incomplete installations.
+    ChatOllama = None  # type: ignore[assignment,misc]
+
+
+DEFAULT_OPENAI_MODEL = "gpt-5-mini"
+DEFAULT_OLLAMA_MODEL = "llama3.2"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are ResearchLite, a helpful assistant powered by a lightweight RAG system.\n"
     "Use the following pieces of retrieved context to answer the user's question.\n"
@@ -29,24 +42,78 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+class OllamaUnavailableError(RuntimeError):
+    """Raised when the selected Ollama service or model cannot be used."""
+
+
+def _ollama_base_url(base_url: str | None) -> str:
+    """Return the root URL expected by Ollama's native API."""
+    return (base_url or DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+
+
+def _validate_ollama(model_name: str, base_url: str) -> None:
+    """Check that Ollama is reachable and has the requested model installed."""
+    try:
+        request = Request(f"{base_url}/api/tags", method="GET")
+        with urlopen(request, timeout=3) as response:  # noqa: S310 - user-selected local endpoint.
+            payload = json.loads(response.read())
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise OllamaUnavailableError(
+            f"Cannot reach Ollama at {base_url}. Start it with `ollama serve`, "
+            "or pass its root URL with --llm-base-url."
+        ) from exc
+
+    installed_models = {
+        model.get("name") for model in payload.get("models", []) if isinstance(model, dict)
+    }
+    installed_aliases = {
+        installed_name.removesuffix(":latest")
+        for installed_name in installed_models
+        if isinstance(installed_name, str)
+    }
+    if model_name not in installed_models and model_name not in installed_aliases:
+        raise OllamaUnavailableError(
+            f"Ollama is running, but model {model_name!r} is not installed. "
+            f"Run `ollama pull {model_name}` and try again."
+        )
+
+
 class RAGGenerator:
     def __init__(
         self,
-        model_name: str = "gpt-5-mini",
+        model_name: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         temperature: float = 0.0,
+        provider: str = "openai",
     ) -> None:
+        if provider not in {"openai", "ollama"}:
+            raise ValueError(f"Unsupported LLM provider: {provider!r}")
+
         final_api_key: SecretStr | None = None
-        if api_key is not None:
+        if provider == "openai" and api_key is not None:
             final_api_key = SecretStr(api_key)
 
-        self._llm: BaseChatModel = ChatOpenAI(
-            model=model_name,
-            api_key=final_api_key,
-            base_url=base_url,
-            temperature=temperature,
-        )
+        if provider == "ollama":
+            if ChatOllama is None:
+                raise RuntimeError(
+                    "Ollama support is not installed. Run `pip install -r requirements.txt`."
+                )
+            final_model_name = model_name or DEFAULT_OLLAMA_MODEL
+            ollama_url = _ollama_base_url(base_url)
+            _validate_ollama(final_model_name, ollama_url)
+            self._llm: BaseChatModel = ChatOllama(
+                model=final_model_name,
+                base_url=ollama_url,
+                temperature=temperature,
+            )
+        else:
+            self._llm = ChatOpenAI(
+                model=model_name or DEFAULT_OPENAI_MODEL,
+                api_key=final_api_key,
+                base_url=base_url,
+                temperature=temperature,
+            )
         self._prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", DEFAULT_SYSTEM_PROMPT),

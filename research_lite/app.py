@@ -170,17 +170,28 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     # LLM Generation arguments
     parser.add_argument(
+        "--llm-provider",
+        choices=("openai", "ollama"),
+        default="openai",
+        help="LLM backend: OpenAI-compatible API (default) or a local Ollama server.",
+    )
+    parser.add_argument(
         "--llm-model",
-        default="gpt-5-mini",
-        help="LLM model name for generation (e.g., gpt-3.5-turbo, gpt-4).",
+        help=(
+            "LLM model name. Defaults to gpt-5-mini for OpenAI-compatible APIs "
+            "and llama3.2 for Ollama."
+        ),
     )
     parser.add_argument(
         "--llm-api-key",
-        help="API Key for the LLM service. Can also be set via OPENAI_API_KEY env var.",
+        help="API key for an OpenAI-compatible service. Can also be set via OPENAI_API_KEY.",
     )
     parser.add_argument(
         "--llm-base-url",
-        help="Base URL for the LLM service (useful for compatible APIs like DeepSeek/LocalAI).",
+        help=(
+            "Base URL for the LLM service. For Ollama, use its root URL "
+            "(default: http://localhost:11434)."
+        ),
     )
     parser.add_argument(
         "--no-generation",
@@ -388,12 +399,20 @@ def main() -> None:
                             model_name=args.llm_model,
                             api_key=final_api_key,
                             base_url=args.llm_base_url,
+                            provider=args.llm_provider,
                         )
                         answer = generator.generate_answer(args.query, results)
                         print(f"\nAnswer:\n{answer}")
                     except Exception as e:
                         print(f"Failed to generate answer: {e}")
-                        print("Tip: Ensure you have set OPENAI_API_KEY or passed --llm-api-key.")
+                        if args.llm_provider == "ollama":
+                            print(
+                                "Tip: Start Ollama with `ollama serve` and pull the selected model."
+                            )
+                        else:
+                            print(
+                                "Tip: Ensure you have set OPENAI_API_KEY or passed --llm-api-key."
+                            )
 
 
 if __name__ == "__main__":
