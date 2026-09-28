@@ -80,9 +80,49 @@ def ingest_and_embed(
     return embedded, vector_store, service
 
 
+def load_persisted_library(
+    library_root: Path,
+    *,
+    current_config_fingerprint: str,
+    embedding_service: EmbeddingService,
+    index_name: str = "index",
+) -> FaissVectorStore:
+    """Load a library created by ``--refresh-library`` without re-embedding it."""
+    manifest = IngestionManifest.open(library_root)
+    try:
+        recorded_config_fingerprint = manifest.state_value("config_fingerprint")
+        state_dir = manifest.state_dir
+    finally:
+        manifest.close()
+
+    if recorded_config_fingerprint != current_config_fingerprint:
+        msg = (
+            f"Library at '{library_root}' was indexed with different embedding or chunking "
+            "settings. Re-run --refresh-library with the settings used to query it."
+        )
+        raise RuntimeError(msg)
+
+    index_path = state_dir / f"{index_name}.faiss"
+    if not index_path.is_file():
+        msg = (
+            f"No persisted FAISS index found at '{index_path}'. "
+            "Run --refresh-library before querying this library."
+        )
+        raise FileNotFoundError(msg)
+
+    # RefreshLibrary creates this state locally. FAISS persists its document store in a
+    # pickle file, so loading the managed local library necessarily opts into it here.
+    return FaissVectorStore.load(
+        state_dir,
+        embedding_backend=embedding_service.backend,
+        index_name=index_name,
+        allow_dangerous_deserialization=True,
+    )
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the ResearchLite RAG pipeline locally.")
-    parser.add_argument("path", help="File or directory to ingest.")
+    parser.add_argument("path", help="Document path or persisted library root.")
     parser.add_argument(
         "--ext",
         dest="extensions",
@@ -123,7 +163,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--index-name", default="index")
     parser.add_argument("--allow-dangerous-deserialization", action="store_true")
     parser.add_argument(
-        "--query", help="Optional text to embed and search against the built FAISS index."
+        "--query",
+        help="Search text against an existing .researchlite library.",
     )
     parser.add_argument(
         "--top-k",
@@ -213,15 +254,16 @@ def main() -> None:
     args = parser.parse_args()
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
+    current_config_fingerprint = config_fingerprint(
+        model_name=args.model_name,
+        split_config=split_config,
+    )
 
     if args.init_library:
         library_root = resolve_library_root(args.path, args.library_dir)
         manifest = IngestionManifest.initialize(
             library_root,
-            current_config_fingerprint=config_fingerprint(
-                model_name=args.model_name,
-                split_config=split_config,
-            ),
+            current_config_fingerprint=current_config_fingerprint,
         )
         try:
             print(f"Initialized ResearchLite library manifest at '{manifest.state_dir}'.")
@@ -240,10 +282,7 @@ def main() -> None:
         try:
             result = refresh_library(
                 library_root,
-                current_config_fingerprint=config_fingerprint(
-                    model_name=args.model_name,
-                    split_config=split_config,
-                ),
+                current_config_fingerprint=current_config_fingerprint,
                 embedding_service=refresh_service,
                 split_config=split_config,
                 extensions=args.extensions,
@@ -272,6 +311,8 @@ def main() -> None:
     embedded: list[EmbeddedDocument] = []
     vector_store: FaissVectorStore | None = None
     service: EmbeddingService | None = None
+    library_root = resolve_library_root(args.path, args.library_dir)
+    has_persisted_library = (library_root / ".researchlite").is_dir()
 
     if args.load_index:
         service = build_default_embedding_service(
@@ -290,6 +331,28 @@ def main() -> None:
             print(f"Loaded FAISS index '{args.index_name}' from '{args.load_index}'.")
         except ImportError as exc:
             raise RuntimeError("FAISS is required to load a index.") from exc
+    elif args.query:
+        if not has_persisted_library:
+            parser.error(
+                f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
+                "Run --refresh-library before querying."
+            )
+        service = build_default_embedding_service(
+            model_name=args.model_name,
+            device=args.device,
+            batch_size=args.batch_size,
+            local_files_only=args.local_files_only,
+        )
+        try:
+            vector_store = load_persisted_library(
+                library_root,
+                current_config_fingerprint=current_config_fingerprint,
+                embedding_service=service,
+                index_name=args.index_name,
+            )
+            print(f"Loaded ResearchLite library index '{args.index_name}' from '{library_root}'.")
+        except (FileNotFoundError, RuntimeError) as exc:
+            parser.error(str(exc))
     else:
         ingest_report = IngestReport()
         embedded, vector_store, service = ingest_and_embed(
