@@ -28,7 +28,6 @@ def build_default_embedding_service(
     backend = HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs={"device": device, "local_files_only": local_files_only},
-        encode_kwargs={"show_progress_bar": False},
     )
     return EmbeddingService(backend, EmbeddingConfig(batch_size=batch_size))
 
