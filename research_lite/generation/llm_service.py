@@ -27,7 +27,7 @@ from langchain_openai import ChatOpenAI
 try:
     from langchain_ollama import ChatOllama
 except ImportError:  # pragma: no cover - exercised only in incomplete installations.
-    ChatOllama = None  # type: ignore[assignment,misc]
+    ChatOllama = None
 
 
 DEFAULT_OPENAI_MODEL = "gpt-5-mini"

@@ -7,6 +7,7 @@ langchain-text-splitters
 langchain-openai
 langchain-ollama
 python-dotenv
+prompt_toolkit
 pypdf
 pytest
 sentence-transformers

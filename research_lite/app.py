@@ -161,9 +161,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--index-name", default="index")
     parser.add_argument("--allow-dangerous-deserialization", action="store_true")
-    parser.add_argument(
+    query_mode = parser.add_mutually_exclusive_group()
+    query_mode.add_argument(
         "--query",
         help="Search text against an existing .researchlite library.",
+    )
+    query_mode.add_argument(
+        "--chat",
+        action="store_true",
+        help="Start an interactive terminal chat against an existing .researchlite library.",
     )
     parser.add_argument(
         "--top-k",
@@ -270,6 +276,11 @@ def main() -> None:
             manifest.close()
         return
 
+    if args.chat and args.load_index:
+        parser.error(
+            "--chat uses a managed .researchlite library and cannot be combined with --load-index."
+        )
+
     if args.refresh_library:
         library_root = resolve_library_root(args.path, args.library_dir)
         refresh_service = build_default_embedding_service(
@@ -330,7 +341,7 @@ def main() -> None:
             print(f"Loaded FAISS index '{args.index_name}' from '{args.load_index}'.")
         except ImportError as exc:
             raise RuntimeError("FAISS is required to load a index.") from exc
-    elif args.query:
+    elif args.query or args.chat:
         if not has_persisted_library:
             parser.error(
                 f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
@@ -386,7 +397,7 @@ def main() -> None:
                 vector_store.save(output_dir, index_name=args.index_name)
                 print(f"Saved FAISS index '{args.index_name}' to '{output_dir}'.")
 
-    if args.query:
+    if args.query or args.chat:
         if vector_store is None:
             print("Cannot run query because the FAISS index was not built or loaded.")
         elif service is None:
@@ -416,6 +427,26 @@ def main() -> None:
                 rrf_constant=args.rrf_constant,
                 reranker=reranker,
             )
+            if args.chat:
+                generator: RAGGenerator | None = None
+                if not args.no_generation:
+                    try:
+                        generator = RAGGenerator(
+                            model_name=args.llm_model,
+                            api_key=args.llm_api_key or os.environ.get("OPENAI_API_KEY"),
+                            base_url=args.llm_base_url,
+                            provider=args.llm_provider,
+                        )
+                    except Exception as exc:
+                        parser.error(str(exc))
+                from research_lite.repl import TerminalChat
+
+                TerminalChat(
+                    session,
+                    generate_answer=generator.generate_answer if generator else None,
+                ).run()
+                return
+
             print(f"Running {retrieval_mode} search for query: {args.query!r}")
             outcome = session.query(args.query)
             results = outcome.documents
