@@ -28,11 +28,10 @@ from research_lite.library_lock import LibraryRefreshLockedError
 from research_lite.library_refresh import refresh_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
+from research_lite.query_session import LibraryQuerySession, format_evidence
 from research_lite.retrieval import (
     DEFAULT_RERANKER_MODEL,
     CrossEncoderReranker,
-    HybridRetriever,
-    RerankerUnavailableError,
     RetrievalMode,
 )
 from research_lite.vectorstore import FaissVectorStore
@@ -404,53 +403,30 @@ def main() -> None:
                 if retrieval_mode == "hybrid-rerank"
                 else None
             )
-            if embedded:
-                retrieval_documents = [item.document for item in embedded]
-            else:
-                retrieval_documents = vector_store.documents()
-            retriever = HybridRetriever(
+            retrieval_documents = (
+                [item.document for item in embedded] if embedded else vector_store.documents()
+            )
+            session = LibraryQuerySession(
                 vector_store,
-                retrieval_documents,
+                service,
+                retrieval_documents=retrieval_documents,
+                retrieval_mode=retrieval_mode,
+                top_k=args.top_k,
+                candidate_k=args.retrieval_candidates,
                 rrf_constant=args.rrf_constant,
                 reranker=reranker,
             )
             print(f"Running {retrieval_mode} search for query: {args.query!r}")
-            query_vector = service.embed_query(args.query)
-            search_kwargs = {
-                "k": max(1, args.top_k),
-                "candidate_k": max(1, args.retrieval_candidates),
-            }
-            try:
-                results = retriever.search(
-                    args.query,
-                    query_vector,
-                    mode=retrieval_mode,
-                    **search_kwargs,
-                )
-            except RerankerUnavailableError as exc:
-                if retrieval_mode != "hybrid-rerank":
-                    raise
-                print(f"Reranker unavailable ({exc}); falling back to hybrid retrieval.")
-                results = retriever.search(
-                    args.query,
-                    query_vector,
-                    mode="hybrid",
-                    **search_kwargs,
-                )
+            outcome = session.query(args.query)
+            results = outcome.documents
+            if outcome.reranker_unavailable:
+                print("Reranker unavailable; falling back to hybrid retrieval.")
             if not results:
                 print("No results returned from retrieval.")
             else:
                 print(f"Found {len(results)} relevant evidence chunks:")
-                for idx, doc in enumerate(results, start=1):
-                    preview = doc.page_content[:240].replace("\n", " ")
-                    print(
-                        f"[{idx}] title={doc.metadata.get('title')!r} "
-                        f"source={doc.metadata.get('source_path')!r} "
-                        f"page_or_unit={doc.metadata.get('source_unit')!r} "
-                        f"chunk_id={doc.metadata.get('chunk_id')!r}\n"
-                        f"  excerpt={preview!r}\n"
-                        f"  metadata={doc.metadata}"
-                    )
+                for evidence in format_evidence(results):
+                    print(evidence)
 
                 if not args.no_generation:
                     print("\nGenerating answer...")
