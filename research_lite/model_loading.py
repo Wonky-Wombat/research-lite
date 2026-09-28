@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 
 def silence_transformers_progress() -> None:
-    """Disable Transformers' low-level progress bars in the terminal interface."""
+    """Hide dependency status noise while preserving model-loading errors."""
     from transformers.utils import logging as transformers_logging
 
     transformers_logging.disable_progress_bar()
+    logging.getLogger("huggingface_hub").setLevel(logging.ERROR)

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from langchain_core.documents import Document
 
+from research_lite.library_stats import LibraryStats
 from research_lite.query_session import LibraryQuerySession, QueryOutcome, format_evidence
 
 AnswerGenerator = Callable[[str, Sequence[Document]], str | None]
@@ -13,19 +16,31 @@ Output = Callable[[str], None]
 
 _HELP_TEXT = """Commands:
   /help       Show this help message.
+  /library    Show local library statistics.
   /sources    Show the full retrieved evidence from the last question.
   /exit       Leave the chat. Ctrl-D also exits.
 
 Ask a question to search the loaded library. Each question is retrieved independently."""
 
+_COUNT_QUESTION = re.compile(
+    r"\b(?:how many|number of|count)\b.*\b(?:papers?|documents?|pdfs?|files?)\b",
+    re.IGNORECASE,
+)
+
 
 def _source_summary(documents: Sequence[Document]) -> str:
     """Return compact citations for an answer printed in the terminal."""
-    sources = []
-    for index, document in enumerate(documents, start=1):
+    sources: list[str] = []
+    seen_paths: set[str] = set()
+    for document in documents:
         title = document.metadata.get("title", "Unknown")
         source_path = document.metadata.get("source_path", "Unknown")
-        sources.append(f"[{index}] {title} ({source_path})")
+        key = str(source_path)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        source_name = Path(key).name if key != "Unknown" else key
+        sources.append(f"[{len(sources) + 1}] {title} ({source_name})")
     return "\n".join(sources)
 
 
@@ -37,10 +52,12 @@ class TerminalChat:
         query_session: LibraryQuerySession,
         *,
         generate_answer: AnswerGenerator | None,
+        library_stats: LibraryStats | None = None,
         output: Output = print,
     ) -> None:
         self._query_session = query_session
         self._generate_answer = generate_answer
+        self._library_stats = library_stats
         self._output = output
         self._last_documents: list[Document] = []
 
@@ -55,6 +72,8 @@ class TerminalChat:
 
         prompt: PromptSession[str] = PromptSession(history=InMemoryHistory())
         self._output("ResearchLite chat is ready. Type /help for commands.")
+        if self._library_stats is not None:
+            self._output(self._library_stats.display())
         while True:
             try:
                 question = prompt.prompt("You> ").strip()
@@ -73,6 +92,9 @@ class TerminalChat:
             if question == "/help":
                 self._output(_HELP_TEXT)
                 continue
+            if question == "/library":
+                self._show_library()
+                continue
             if question == "/sources":
                 self._show_sources()
                 continue
@@ -80,7 +102,10 @@ class TerminalChat:
                 self._output("Unknown command. Type /help for available commands.")
                 continue
 
-            self._answer(question)
+            if self._is_library_count_question(question):
+                self._show_library_count()
+            else:
+                self._answer(question)
 
     def _answer(self, question: str) -> None:
         outcome = self._query_session.query(question)
@@ -113,3 +138,25 @@ class TerminalChat:
         self._output("\nRetrieved evidence:")
         for evidence in format_evidence(self._last_documents):
             self._output(evidence)
+
+    def _show_library(self) -> None:
+        if self._library_stats is None:
+            self._output("Library statistics are unavailable for this session.")
+            return
+        self._output(self._library_stats.display())
+
+    def _show_library_count(self) -> None:
+        if self._library_stats is None:
+            self._output("I cannot determine the library-wide paper count in this session.")
+            return
+        self._output(
+            f"This library contains {self._library_stats.indexed_sources} indexed papers "
+            f"and {self._library_stats.chunks} chunks."
+        )
+
+    @staticmethod
+    def _is_library_count_question(question: str) -> bool:
+        return bool(_COUNT_QUESTION.search(question)) or (
+            "多少" in question
+            and any(word in question.lower() for word in ("论文", "文献", "pdf", "文件"))
+        )

@@ -23,9 +23,15 @@ from research_lite.embedding.embedding_builder import (
     build_default_embedding_service,
 )
 from research_lite.generation import RAGGenerator
+from research_lite.generation.llm_service import (
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OPENAI_MODEL,
+)
 from research_lite.ingestion import IngestReport, load_documents
 from research_lite.library_lock import LibraryRefreshLockedError
-from research_lite.library_refresh import refresh_library
+from research_lite.library_refresh import RefreshResult, refresh_library
+from research_lite.library_stats import inspect_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.query_session import LibraryQuerySession, format_evidence
@@ -35,6 +41,7 @@ from research_lite.retrieval import (
     RerankerUnavailableError,
     RetrievalMode,
 )
+from research_lite.settings import LLMSettings, load_llm_settings, save_llm_settings
 from research_lite.vectorstore import FaissVectorStore
 
 
@@ -117,6 +124,107 @@ def load_persisted_library(
         embedding_backend=embedding_service.backend,
         index_name=index_name,
         allow_dangerous_deserialization=True,
+    )
+
+
+def _initialize_library_if_needed(library_root: Path, *, current_config_fingerprint: str) -> bool:
+    """Create a manifest on first one-click launch and report whether it was new."""
+    manifest_path = library_root / ".researchlite" / "manifest.sqlite"
+    if manifest_path.is_file():
+        return False
+    manifest = IngestionManifest.initialize(
+        library_root,
+        current_config_fingerprint=current_config_fingerprint,
+    )
+    manifest.close()
+    return True
+
+
+def _print_refresh_result(result: RefreshResult) -> None:
+    """Print a concise progress summary for an incremental refresh."""
+    plan = result.plan
+    print(
+        "Library sync: "
+        f"new={len(plan.new)}, changed={len(plan.changed)}, "
+        f"unchanged={len(plan.unchanged)}, deleted={len(plan.deleted)}."
+    )
+    print(
+        "Index update: "
+        f"indexed={len(result.indexed_sources)}, "
+        f"failed={len(result.failed_sources)}, "
+        f"chunks_added={result.added_chunks}, "
+        f"chunks_removed={result.deleted_chunks}."
+    )
+    for refresh_failure in plan.failed:
+        print(f"  Inspection failed: {refresh_failure.path}: {refresh_failure.reason}")
+    for source_file in result.failed_sources:
+        print(f"  Refresh failed: {source_file}")
+
+
+def _refresh_library(
+    parser: argparse.ArgumentParser,
+    *,
+    library_root: Path,
+    current_config_fingerprint: str,
+    args: argparse.Namespace,
+    split_config: SplitConfig,
+) -> None:
+    """Run the explicit write phase used by refresh and one-click startup."""
+    refresh_service = build_default_embedding_service(
+        model_name=args.model_name,
+        device=args.device,
+        batch_size=args.batch_size,
+        local_files_only=args.local_files_only,
+    )
+    try:
+        result = refresh_library(
+            library_root,
+            current_config_fingerprint=current_config_fingerprint,
+            embedding_service=refresh_service,
+            split_config=split_config,
+            extensions=args.extensions,
+            index_name=args.index_name,
+        )
+    except LibraryRefreshLockedError as exc:
+        parser.error(str(exc))
+    _print_refresh_result(result)
+
+
+def _is_one_click_launch(args: argparse.Namespace) -> bool:
+    """Return whether the user requested the default sync-then-chat experience."""
+    return not any(
+        (
+            args.init_library,
+            args.refresh_library,
+            args.load_index,
+            args.save_index,
+            args.query,
+            args.chat,
+        )
+    )
+
+
+def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
+    """Resolve CLI overrides against non-secret, local-first user settings."""
+    settings = load_llm_settings()
+    requested_provider = args.llm_provider
+    args.llm_provider = requested_provider or settings.provider
+    uses_saved_provider = requested_provider is None or requested_provider == settings.provider
+    if args.llm_model is None:
+        if uses_saved_provider:
+            args.llm_model = settings.model
+        elif args.llm_provider == "ollama":
+            args.llm_model = DEFAULT_OLLAMA_MODEL
+        else:
+            args.llm_model = DEFAULT_OPENAI_MODEL
+    if args.llm_base_url is None and uses_saved_provider:
+        args.llm_base_url = settings.base_url
+    if args.llm_provider != "ollama":
+        return None
+    return LLMSettings(
+        provider=args.llm_provider,
+        model=args.llm_model,
+        base_url=args.llm_base_url or DEFAULT_OLLAMA_BASE_URL,
     )
 
 
@@ -219,15 +327,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--llm-provider",
         choices=("openai", "ollama"),
-        default="openai",
-        help="LLM backend: OpenAI-compatible API (default) or a local Ollama server.",
+        help="LLM backend. Defaults to the saved local setting, or Ollama on first launch.",
     )
     parser.add_argument(
         "--llm-model",
-        help=(
-            "LLM model name. Defaults to gpt-5-mini for OpenAI-compatible APIs "
-            "and llama3.2 for Ollama."
-        ),
+        help=("LLM model name. Defaults to the saved local setting, or llama3.2 on first launch."),
     )
     parser.add_argument(
         "--llm-api-key",
@@ -235,10 +339,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--llm-base-url",
-        help=(
-            "Base URL for the LLM service. For Ollama, use its root URL "
-            "(default: http://localhost:11434)."
-        ),
+        help=("Base URL for the LLM service. Defaults to the saved local setting."),
     )
     parser.add_argument(
         "--no-generation",
@@ -258,6 +359,11 @@ def main() -> None:
 
     parser = _build_arg_parser()
     args = parser.parse_args()
+    one_click_launch = _is_one_click_launch(args)
+    try:
+        effective_llm_settings = _apply_llm_defaults(args)
+    except RuntimeError as exc:
+        parser.error(str(exc))
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
     current_config_fingerprint = config_fingerprint(
@@ -277,53 +383,51 @@ def main() -> None:
             manifest.close()
         return
 
+    library_root = resolve_library_root(args.path, args.library_dir)
+
+    if one_click_launch:
+        print("ResearchLite · Local research assistant")
+        if _initialize_library_if_needed(
+            library_root,
+            current_config_fingerprint=current_config_fingerprint,
+        ):
+            print(f"Created local library at '{library_root / '.researchlite'}'.")
+        print("Syncing library...")
+        _refresh_library(
+            parser,
+            library_root=library_root,
+            current_config_fingerprint=current_config_fingerprint,
+            args=args,
+            split_config=split_config,
+        )
+        if effective_llm_settings is not None:
+            save_llm_settings(effective_llm_settings)
+        args.chat = True
+
     if args.chat and args.load_index:
         parser.error(
             "--chat uses a managed .researchlite library and cannot be combined with --load-index."
         )
 
     if args.refresh_library:
-        library_root = resolve_library_root(args.path, args.library_dir)
-        refresh_service = build_default_embedding_service(
-            model_name=args.model_name,
-            device=args.device,
-            batch_size=args.batch_size,
-            local_files_only=args.local_files_only,
+        if _initialize_library_if_needed(
+            library_root,
+            current_config_fingerprint=current_config_fingerprint,
+        ):
+            print(f"Created local library at '{library_root / '.researchlite'}'.")
+        _refresh_library(
+            parser,
+            library_root=library_root,
+            current_config_fingerprint=current_config_fingerprint,
+            args=args,
+            split_config=split_config,
         )
-        try:
-            result = refresh_library(
-                library_root,
-                current_config_fingerprint=current_config_fingerprint,
-                embedding_service=refresh_service,
-                split_config=split_config,
-                extensions=args.extensions,
-                index_name=args.index_name,
-            )
-        except LibraryRefreshLockedError as exc:
-            parser.error(str(exc))
-        plan = result.plan
-        print(
-            "Refresh plan: "
-            f"new={len(plan.new)}, changed={len(plan.changed)}, "
-            f"unchanged={len(plan.unchanged)}, deleted={len(plan.deleted)}, "
-            f"inspection_failed={len(plan.failed)}."
-        )
-        print(
-            "Refresh result: "
-            f"indexed={len(result.indexed_sources)}, failed={len(result.failed_sources)}, "
-            f"deleted_chunks={result.deleted_chunks}, added_chunks={result.added_chunks}."
-        )
-        for refresh_failure in plan.failed:
-            print(f"  Inspection failed: {refresh_failure.path}: {refresh_failure.reason}")
-        for source_file in result.failed_sources:
-            print(f"  Refresh failed: {source_file}")
         return
 
     embedded: list[EmbeddedDocument] = []
     vector_store: FaissVectorStore | None = None
     service: EmbeddingService | None = None
-    library_root = resolve_library_root(args.path, args.library_dir)
-    has_persisted_library = (library_root / ".researchlite").is_dir()
+    has_persisted_library = (library_root / ".researchlite" / "manifest.sqlite").is_file()
 
     if args.load_index:
         service = build_default_embedding_service(
@@ -346,7 +450,8 @@ def main() -> None:
         if not has_persisted_library:
             parser.error(
                 f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
-                "Run --refresh-library before querying."
+                "Run --refresh-library before querying, or run `researchlite <path>` once "
+                "to create and synchronize it."
             )
         service = build_default_embedding_service(
             model_name=args.model_name,
@@ -450,9 +555,15 @@ def main() -> None:
                         parser.error(str(exc))
                 from research_lite.repl import TerminalChat
 
+                library_stats = (
+                    inspect_library(library_root, vector_store)
+                    if has_persisted_library and not args.load_index
+                    else None
+                )
                 TerminalChat(
                     session,
                     generate_answer=generator.generate_answer if generator else None,
+                    library_stats=library_stats,
                 ).run()
                 return
 
