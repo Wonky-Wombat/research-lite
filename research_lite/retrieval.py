@@ -17,6 +17,7 @@ from typing import Literal, Protocol, cast
 
 from langchain_core.documents import Document
 
+from research_lite.model_loading import silence_transformers_progress
 from research_lite.vectorstore import FaissVectorStore
 
 RetrievalMode = Literal["dense", "hybrid", "hybrid-rerank"]
@@ -168,6 +169,7 @@ class CrossEncoderReranker:
             try:
                 from sentence_transformers import CrossEncoder
 
+                silence_transformers_progress()
                 self._model = CrossEncoder(
                     self._model_name,
                     device=self._device,
@@ -177,6 +179,10 @@ class CrossEncoderReranker:
                 msg = f"Could not load reranker model {self._model_name!r}."
                 raise RerankerUnavailableError(msg) from exc
         return self._model
+
+    def warm_up(self) -> None:
+        """Load the reranker before an interactive session starts."""
+        self._get_model()
 
     def rerank(self, query: str, documents: Sequence[Document]) -> list[Document]:
         """Return the candidate chunks ordered by cross-encoder relevance."""

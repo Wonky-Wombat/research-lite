@@ -32,6 +32,7 @@ from research_lite.query_session import LibraryQuerySession, format_evidence
 from research_lite.retrieval import (
     DEFAULT_RERANKER_MODEL,
     CrossEncoderReranker,
+    RerankerUnavailableError,
     RetrievalMode,
 )
 from research_lite.vectorstore import FaissVectorStore
@@ -414,6 +415,14 @@ def main() -> None:
                 if retrieval_mode == "hybrid-rerank"
                 else None
             )
+            if args.chat and reranker is not None:
+                print("Preparing local retrieval model...")
+                try:
+                    reranker.warm_up()
+                except RerankerUnavailableError:
+                    print("Reranker unavailable; chat will use hybrid retrieval.")
+                    retrieval_mode = "hybrid"
+                    reranker = None
             retrieval_documents = (
                 [item.document for item in embedded] if embedded else vector_store.documents()
             )

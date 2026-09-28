@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from research_lite.model_loading import silence_transformers_progress
+
 from . import EmbeddingConfig, EmbeddingService
 
 DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -22,9 +24,11 @@ def build_default_embedding_service(
     """Construct the project's default embedding service."""
     from langchain_huggingface import HuggingFaceEmbeddings
 
+    silence_transformers_progress()
     backend = HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs={"device": device, "local_files_only": local_files_only},
+        encode_kwargs={"show_progress_bar": False},
     )
     return EmbeddingService(backend, EmbeddingConfig(batch_size=batch_size))
 

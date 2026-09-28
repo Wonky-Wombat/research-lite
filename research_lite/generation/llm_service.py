@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -24,10 +25,13 @@ except ImportError:
 
 from langchain_openai import ChatOpenAI
 
+ChatOllama: Any = None
 try:
-    from langchain_ollama import ChatOllama
+    from langchain_ollama import ChatOllama as _chat_ollama
+
+    ChatOllama = _chat_ollama
 except ImportError:  # pragma: no cover - exercised only in incomplete installations.
-    ChatOllama = None
+    pass
 
 
 DEFAULT_OPENAI_MODEL = "gpt-5-mini"
