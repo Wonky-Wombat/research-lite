@@ -211,9 +211,7 @@ def _is_one_click_launch(args: argparse.Namespace) -> bool:
     )
 
 
-def _require_active_library(
-    parser: argparse.ArgumentParser, settings: LibrarySettings
-) -> Path:
+def _require_active_library(parser: argparse.ArgumentParser, settings: LibrarySettings) -> Path:
     """Return the selected library or give a useful first-run command."""
     if settings.active_library is None:
         parser.error(
