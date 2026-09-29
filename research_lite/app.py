@@ -41,7 +41,14 @@ from research_lite.retrieval import (
     RerankerUnavailableError,
     RetrievalMode,
 )
-from research_lite.settings import LLMSettings, load_llm_settings, save_llm_settings
+from research_lite.settings import (
+    LibrarySettings,
+    LLMSettings,
+    load_library_settings,
+    load_llm_settings,
+    save_active_library,
+    save_llm_settings,
+)
 from research_lite.vectorstore import FaissVectorStore
 
 
@@ -204,6 +211,52 @@ def _is_one_click_launch(args: argparse.Namespace) -> bool:
     )
 
 
+def _require_active_library(
+    parser: argparse.ArgumentParser, settings: LibrarySettings
+) -> Path:
+    """Return the selected library or give a useful first-run command."""
+    if settings.active_library is None:
+        parser.error(
+            "No default ResearchLite library is configured. "
+            "Run `researchlite add <path>` to create one."
+        )
+    return settings.active_library
+
+
+def _print_libraries(settings: LibrarySettings) -> None:
+    """Show locally remembered libraries without loading models or indexes."""
+    if not settings.libraries:
+        print("No libraries configured. Run `researchlite add <path>` to create one.")
+        return
+    print("ResearchLite libraries:")
+    for library in settings.libraries:
+        marker = "*" if library == settings.active_library else " "
+        print(f"{marker} {library}")
+
+
+def _resolve_command(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[str, str | None]:
+    """Interpret friendly library commands while keeping the old path shorthand."""
+    command = args.command_or_path
+    path = args.path
+    if command is None:
+        if path is not None:
+            parser.error("A path must follow `add` or `use`.")
+        return "open-default", None
+    if command in {"add", "use"}:
+        if path is None:
+            parser.error(f"`researchlite {command}` requires a document directory.")
+        return command, path
+    if command in {"sync", "libraries"}:
+        if path is not None:
+            parser.error(f"`researchlite {command}` does not accept a path.")
+        return command, None
+    if path is not None:
+        parser.error(f"Unrecognized command: {command!r}.")
+    return "open-path", command
+
+
 def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
     """Resolve CLI overrides against non-secret, local-first user settings."""
     settings = load_llm_settings()
@@ -229,8 +282,30 @@ def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the ResearchLite RAG pipeline locally.")
-    parser.add_argument("path", help="Document path or persisted library root.")
+    parser = argparse.ArgumentParser(
+        description="Run the ResearchLite RAG pipeline locally.",
+        epilog=(
+            "Examples:\n"
+            "  researchlite                    Open the default library.\n"
+            "  researchlite add ~/papers       Create or sync a library, then chat.\n"
+            "  researchlite use ~/papers       Switch to an existing library.\n"
+            "  researchlite sync               Incrementally sync the default library.\n"
+            "  researchlite libraries          List known libraries."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "command_or_path",
+        nargs="?",
+        metavar="command_or_path",
+        help="Library command (add, use, sync, libraries) or a document path shorthand.",
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        metavar="path",
+        help="Document path required by the add and use commands.",
+    )
     parser.add_argument(
         "--ext",
         dest="extensions",
@@ -359,11 +434,67 @@ def main() -> None:
 
     parser = _build_arg_parser()
     args = parser.parse_args()
-    one_click_launch = _is_one_click_launch(args)
+    command, command_path = _resolve_command(parser, args)
+    requested_one_click = _is_one_click_launch(args)
     try:
+        library_settings = load_library_settings()
         effective_llm_settings = _apply_llm_defaults(args)
     except RuntimeError as exc:
         parser.error(str(exc))
+
+    if command == "libraries":
+        _print_libraries(library_settings)
+        return
+
+    remember_library = command in {"add", "use", "open-path"}
+    if command == "open-default":
+        args.path = str(_require_active_library(parser, library_settings))
+        if requested_one_click:
+            args.chat = True
+    elif command == "add":
+        if any(
+            (
+                args.init_library,
+                args.refresh_library,
+                args.load_index,
+                args.save_index,
+                args.query,
+                args.chat,
+            )
+        ):
+            parser.error("`researchlite add` cannot be combined with another library action.")
+        args.path = command_path
+    elif command == "use":
+        if any(
+            (
+                args.init_library,
+                args.refresh_library,
+                args.load_index,
+                args.save_index,
+                args.query,
+            )
+        ):
+            parser.error("`researchlite use` only opens an existing library for chat.")
+        args.path = command_path
+        args.chat = True
+    elif command == "sync":
+        if any(
+            (
+                args.init_library,
+                args.refresh_library,
+                args.load_index,
+                args.save_index,
+                args.query,
+                args.chat,
+            )
+        ):
+            parser.error("`researchlite sync` only synchronizes the default library.")
+        args.path = str(_require_active_library(parser, library_settings))
+        args.refresh_library = True
+    else:
+        args.path = command_path
+
+    one_click_launch = command == "add" or (command == "open-path" and requested_one_click)
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
     current_config_fingerprint = config_fingerprint(
@@ -541,6 +672,8 @@ def main() -> None:
                 rrf_constant=args.rrf_constant,
                 reranker=reranker,
             )
+            if remember_library and has_persisted_library and not args.load_index:
+                save_active_library(library_root)
             if args.chat:
                 generator: RAGGenerator | None = None
                 if not args.no_generation:

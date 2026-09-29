@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass
@@ -21,6 +22,14 @@ class LLMSettings:
     base_url: str = DEFAULT_OLLAMA_BASE_URL
 
 
+@dataclass(frozen=True)
+class LibrarySettings:
+    """User-selected local libraries, stored separately from their indexes."""
+
+    active_library: Path | None = None
+    libraries: tuple[Path, ...] = ()
+
+
 def settings_path() -> Path:
     """Return the user-owned settings location, with a testable override."""
     override = os.environ.get("RESEARCHLITE_CONFIG_PATH")
@@ -29,17 +38,27 @@ def settings_path() -> Path:
     return Path.home() / ".researchlite" / "config.toml"
 
 
-def load_llm_settings() -> LLMSettings:
-    """Load saved local defaults, or return the local-first defaults."""
+def _load_payload() -> dict[str, object]:
+    """Load the small TOML settings document, validating its top-level shape."""
     path = settings_path()
     if not path.is_file():
-        return LLMSettings()
+        return {}
 
     try:
         payload = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         msg = f"Could not read ResearchLite settings at '{path}'."
         raise RuntimeError(msg) from exc
+    if not isinstance(payload, dict):
+        msg = f"Invalid ResearchLite settings at '{path}'."
+        raise RuntimeError(msg)
+    return payload
+
+
+def load_llm_settings() -> LLMSettings:
+    """Load saved local defaults, or return the local-first defaults."""
+    path = settings_path()
+    payload = _load_payload()
 
     llm = payload.get("llm", {})
     if not isinstance(llm, dict):
@@ -56,15 +75,67 @@ def load_llm_settings() -> LLMSettings:
     return LLMSettings(provider=provider, model=model, base_url=base_url)
 
 
-def save_llm_settings(settings: LLMSettings) -> Path:
-    """Persist non-secret defaults so local startup needs no repeated flags."""
+def load_library_settings() -> LibrarySettings:
+    """Load the active and known local libraries without touching their files."""
+    path = settings_path()
+    payload = _load_payload()
+    library = payload.get("library", {})
+    if not isinstance(library, dict):
+        msg = f"Invalid [library] section in ResearchLite settings at '{path}'."
+        raise RuntimeError(msg)
+
+    active = library.get("active")
+    paths = library.get("paths", [])
+    if active is not None and (not isinstance(active, str) or not active):
+        msg = f"Invalid active library in ResearchLite settings at '{path}'."
+        raise RuntimeError(msg)
+    if not isinstance(paths, list) or not all(isinstance(item, str) and item for item in paths):
+        msg = f"Invalid library paths in ResearchLite settings at '{path}'."
+        raise RuntimeError(msg)
+
+    libraries = tuple(Path(item) for item in paths)
+    active_library = Path(active) if active is not None else None
+    if active_library is not None and active_library not in libraries:
+        libraries = (*libraries, active_library)
+    return LibrarySettings(active_library=active_library, libraries=libraries)
+
+
+def _save_settings(*, llm: LLMSettings, library: LibrarySettings) -> Path:
+    """Write the complete non-secret settings document."""
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    library_paths = "\n".join(f"  {json.dumps(str(item))}," for item in library.libraries)
+    active = (
+        ""
+        if library.active_library is None
+        else f"active = {json.dumps(str(library.active_library))}\n"
+    )
     path.write_text(
         "[llm]\n"
-        f'provider = "{settings.provider}"\n'
-        f'model = "{settings.model}"\n'
-        f'base_url = "{settings.base_url}"\n',
+        f"provider = {json.dumps(llm.provider)}\n"
+        f"model = {json.dumps(llm.model)}\n"
+        f"base_url = {json.dumps(llm.base_url)}\n\n"
+        "[library]\n"
+        f"{active}"
+        "paths = [\n"
+        f"{library_paths}\n"
+        "]\n",
         encoding="utf-8",
     )
     return path
+
+
+def save_llm_settings(settings: LLMSettings) -> Path:
+    """Persist non-secret defaults so local startup needs no repeated flags."""
+    return _save_settings(llm=settings, library=load_library_settings())
+
+
+def save_active_library(library_root: Path) -> Path:
+    """Remember a successfully opened library while retaining LLM preferences."""
+    normalized = library_root.expanduser().resolve()
+    current = load_library_settings()
+    libraries = tuple(item for item in current.libraries if item != normalized) + (normalized,)
+    return _save_settings(
+        llm=load_llm_settings(),
+        library=LibrarySettings(active_library=normalized, libraries=libraries),
+    )

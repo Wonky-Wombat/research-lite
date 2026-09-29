@@ -227,3 +227,6 @@ scripts/
 
 # Local model evaluations and exploration notes.
 experiments/
+
+# Personal implementation notes and local planning.
+others/

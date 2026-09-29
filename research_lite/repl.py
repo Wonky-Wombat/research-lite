@@ -68,7 +68,7 @@ class TerminalChat:
             self._output(self._library_stats.display())
         while True:
             try:
-                question = prompt.prompt("You> ").strip()
+                question = prompt.prompt("ResearchLite> ").strip()
             except EOFError:
                 self._output("Goodbye.")
                 return
