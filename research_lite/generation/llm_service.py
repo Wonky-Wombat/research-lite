@@ -25,6 +25,8 @@ except ImportError:
 
 from langchain_openai import ChatOpenAI
 
+from research_lite.citations import citation_number_by_source
+
 ChatOllama: Any = None
 try:
     from langchain_ollama import ChatOllama as _chat_ollama
@@ -42,6 +44,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "You are ResearchLite, a helpful assistant powered by a lightweight RAG system.\n"
     "Use the following pieces of retrieved context to answer the user's question.\n"
     "If the answer is not in the context, say that you don't know. Keep the answer concise.\n\n"
+    "Each context item begins with a source citation like [1]. Cite factual claims using only "
+    "these numbers, for example [1]. Do not write raw source labels, file paths, chunk IDs, "
+    "or metadata.\n\n"
     "Context:\n{context}"
 )
 
@@ -128,10 +133,15 @@ class RAGGenerator:
 
     def generate_answer(self, query: str, context_documents: Iterable[Document]) -> str | None:
         """Generate an answer based on the query and retrieved documents."""
-        context_text = "\n\n".join(
-            f"[Source: {doc.metadata.get('title', 'Unknown')}]\n{doc.page_content}"
-            for doc in context_documents
-        )
+        documents = list(context_documents)
+        citation_numbers = citation_number_by_source(documents)
+        context_items: list[str] = []
+        for document in documents:
+            source_path = str(document.metadata.get("source_path", ""))
+            title = str(document.metadata.get("title", "Unknown"))
+            citation_number = citation_numbers.get(source_path or title, 0)
+            context_items.append(f"[{citation_number}] {title}\n{document.page_content}")
+        context_text = "\n\n".join(context_items)
 
         result = self._chain.invoke({"question": query, "context": context_text})
         if isinstance(result, str):

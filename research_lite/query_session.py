@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.documents import Document
 
+from research_lite.citations import citation_number_by_source
 from research_lite.embedding import EmbeddingService
 from research_lite.retrieval import (
     CrossEncoderReranker,
@@ -82,15 +83,14 @@ class LibraryQuerySession:
 
 def format_evidence(documents: Sequence[Document]) -> list[str]:
     """Return human-readable evidence lines for terminal output."""
+    citation_numbers = citation_number_by_source(documents)
     output: list[str] = []
-    for index, document in enumerate(documents, start=1):
+    for document in documents:
         preview = document.page_content[:240].replace("\n", " ")
-        output.append(
-            f"[{index}] title={document.metadata.get('title')!r} "
-            f"source={document.metadata.get('source_path')!r} "
-            f"page_or_unit={document.metadata.get('source_unit')!r} "
-            f"chunk_id={document.metadata.get('chunk_id')!r}\n"
-            f"  excerpt={preview!r}\n"
-            f"  metadata={document.metadata}"
-        )
+        source_path = str(document.metadata.get("source_path", ""))
+        title = document.metadata.get("title", "Unknown")
+        citation_number = citation_numbers.get(source_path or str(title), 0)
+        source_unit = document.metadata.get("source_unit")
+        unit_suffix = f", page {source_unit}" if source_unit is not None else ""
+        output.append(f"[{citation_number}] {title}{unit_suffix}\n  {preview}")
     return output

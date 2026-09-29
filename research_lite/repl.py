@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from pathlib import Path
 
 from langchain_core.documents import Document
 
+from research_lite.citations import citation_sources
 from research_lite.library_stats import LibraryStats
 from research_lite.query_session import LibraryQuerySession, QueryOutcome, format_evidence
 
@@ -30,18 +30,10 @@ _COUNT_QUESTION = re.compile(
 
 def _source_summary(documents: Sequence[Document]) -> str:
     """Return compact citations for an answer printed in the terminal."""
-    sources: list[str] = []
-    seen_paths: set[str] = set()
-    for document in documents:
-        title = document.metadata.get("title", "Unknown")
-        source_path = document.metadata.get("source_path", "Unknown")
-        key = str(source_path)
-        if key in seen_paths:
-            continue
-        seen_paths.add(key)
-        source_name = Path(key).name if key != "Unknown" else key
-        sources.append(f"[{len(sources) + 1}] {title} ({source_name})")
-    return "\n".join(sources)
+    return "\n".join(
+        f"[{source.number}] {source.title} ({source.filename})"
+        for source in citation_sources(documents)
+    )
 
 
 class TerminalChat:
