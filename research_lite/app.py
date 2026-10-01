@@ -31,6 +31,7 @@ from research_lite.generation.llm_service import (
 from research_lite.ingestion import IngestReport, load_documents
 from research_lite.library_lock import LibraryRefreshLockedError
 from research_lite.library_refresh import RefreshResult, refresh_library
+from research_lite.library_registry import LibraryRegistry, load_library_registry, register_library
 from research_lite.library_stats import inspect_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
@@ -41,14 +42,7 @@ from research_lite.retrieval import (
     RerankerUnavailableError,
     RetrievalMode,
 )
-from research_lite.settings import (
-    LibrarySettings,
-    LLMSettings,
-    load_library_settings,
-    load_llm_settings,
-    save_active_library,
-    save_llm_settings,
-)
+from research_lite.settings import LLMSettings, load_llm_settings, save_llm_settings
 from research_lite.vectorstore import FaissVectorStore
 
 
@@ -211,25 +205,25 @@ def _is_one_click_launch(args: argparse.Namespace) -> bool:
     )
 
 
-def _require_active_library(parser: argparse.ArgumentParser, settings: LibrarySettings) -> Path:
+def _require_active_library(parser: argparse.ArgumentParser, registry: LibraryRegistry) -> Path:
     """Return the selected library or give a useful first-run command."""
-    if settings.active_library is None:
+    if registry.active is None:
         parser.error(
             "No default ResearchLite library is configured. "
             "Run `researchlite add <path>` to create one."
         )
-    return settings.active_library
+    return registry.active.path
 
 
-def _print_libraries(settings: LibrarySettings) -> None:
+def _print_libraries(registry: LibraryRegistry) -> None:
     """Show locally remembered libraries without loading models or indexes."""
-    if not settings.libraries:
+    if not registry.libraries:
         print("No libraries configured. Run `researchlite add <path>` to create one.")
         return
     print("ResearchLite libraries:")
-    for library in settings.libraries:
-        marker = "*" if library == settings.active_library else " "
-        print(f"{marker} {library}")
+    for library in registry.libraries:
+        marker = "*" if library == registry.active else " "
+        print(f"{marker} {library.name}  {library.path}")
 
 
 def _resolve_command(
@@ -435,18 +429,18 @@ def main() -> None:
     command, command_path = _resolve_command(parser, args)
     requested_one_click = _is_one_click_launch(args)
     try:
-        library_settings = load_library_settings()
+        library_registry = load_library_registry()
         effective_llm_settings = _apply_llm_defaults(args)
     except RuntimeError as exc:
         parser.error(str(exc))
 
     if command == "libraries":
-        _print_libraries(library_settings)
+        _print_libraries(library_registry)
         return
 
     remember_library = command in {"add", "use", "open-path"}
     if command == "open-default":
-        args.path = str(_require_active_library(parser, library_settings))
+        args.path = str(_require_active_library(parser, library_registry))
         if requested_one_click:
             args.chat = True
     elif command == "add":
@@ -487,7 +481,7 @@ def main() -> None:
             )
         ):
             parser.error("`researchlite sync` only synchronizes the default library.")
-        args.path = str(_require_active_library(parser, library_settings))
+        args.path = str(_require_active_library(parser, library_registry))
         args.refresh_library = True
     else:
         args.path = command_path
@@ -529,6 +523,7 @@ def main() -> None:
             args=args,
             split_config=split_config,
         )
+        register_library(library_root, synced=True)
         if effective_llm_settings is not None:
             save_llm_settings(effective_llm_settings)
         args.chat = True
@@ -551,6 +546,8 @@ def main() -> None:
             args=args,
             split_config=split_config,
         )
+        if command == "sync":
+            register_library(library_root, activate=False, synced=True)
         return
 
     embedded: list[EmbeddedDocument] = []
@@ -671,7 +668,7 @@ def main() -> None:
                 reranker=reranker,
             )
             if remember_library and has_persisted_library and not args.load_index:
-                save_active_library(library_root)
+                register_library(library_root)
             if args.chat:
                 generator: RAGGenerator | None = None
                 if not args.no_generation:
