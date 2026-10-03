@@ -1,3 +1,10 @@
+#
+# model_loading.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """Presentation controls for locally loaded transformer models."""
 
 from __future__ import annotations

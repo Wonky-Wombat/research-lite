@@ -1,3 +1,10 @@
+#
+# query_session.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """Reusable, read-only query sessions for persisted ResearchLite libraries."""
 
 from __future__ import annotations

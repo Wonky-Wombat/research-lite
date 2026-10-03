@@ -1,3 +1,10 @@
+#
+# library_stats.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """Read-only summary data for a persisted ResearchLite library."""
 
 from __future__ import annotations

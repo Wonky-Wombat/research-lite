@@ -1,3 +1,10 @@
+#
+# repl.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """A small interactive terminal interface for ResearchLite libraries."""
 
 from __future__ import annotations

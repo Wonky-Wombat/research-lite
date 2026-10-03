@@ -1,3 +1,10 @@
+#
+# citations.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """Stable, user-facing citations for retrieved document chunks."""
 
 from __future__ import annotations

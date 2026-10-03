@@ -1,3 +1,10 @@
+#
+# library_lock.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """Process-safe locking for operations that mutate a document library."""
 
 from __future__ import annotations

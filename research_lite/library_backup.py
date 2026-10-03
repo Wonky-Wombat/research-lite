@@ -1,3 +1,10 @@
+#
+# library_backup.py
+# ResearchLite
+#
+# Created by Wonky-Wombat on 2026-10-01.
+#
+
 """Best-effort crash recovery for a single local document library."""
 
 from __future__ import annotations
