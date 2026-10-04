@@ -31,7 +31,13 @@ from research_lite.generation.llm_service import (
 from research_lite.ingestion import IngestReport, load_documents
 from research_lite.library_lock import LibraryRefreshLockedError
 from research_lite.library_refresh import RefreshResult, refresh_library
-from research_lite.library_registry import LibraryRegistry, load_library_registry, register_library
+from research_lite.library_registry import (
+    LibraryRegistry,
+    load_library_registry,
+    register_library,
+    remove_library,
+    select_library,
+)
 from research_lite.library_stats import inspect_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig, split_documents
@@ -210,43 +216,30 @@ def _require_active_library(parser: argparse.ArgumentParser, registry: LibraryRe
     if registry.active is None:
         parser.error(
             "No default ResearchLite library is configured. "
-            "Run `researchlite add <path>` to create one."
+            "Run `researchlite library add <path> --name <name>` to create one."
         )
     return registry.active.path
+
+
+def _require_library(parser: argparse.ArgumentParser, registry: LibraryRegistry, name: str) -> Path:
+    library = registry.get(name)
+    if library is None:
+        parser.error(f"No ResearchLite library named '{name}'.")
+    return library.path
 
 
 def _print_libraries(registry: LibraryRegistry) -> None:
     """Show locally remembered libraries without loading models or indexes."""
     if not registry.libraries:
-        print("No libraries configured. Run `researchlite add <path>` to create one.")
+        print(
+            "No libraries configured. Run `researchlite library add <path> "
+            "--name <name>` to create one."
+        )
         return
     print("ResearchLite libraries:")
     for library in registry.libraries:
         marker = "*" if library == registry.active else " "
         print(f"{marker} {library.name}  {library.path}")
-
-
-def _resolve_command(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> tuple[str, str | None]:
-    """Interpret friendly library commands while keeping the old path shorthand."""
-    command = args.command_or_path
-    path = args.path
-    if command is None:
-        if path is not None:
-            parser.error("A path must follow `add` or `use`.")
-        return "open-default", None
-    if command in {"add", "use"}:
-        if path is None:
-            parser.error(f"`researchlite {command}` requires a document directory.")
-        return command, path
-    if command in {"sync", "libraries"}:
-        if path is not None:
-            parser.error(f"`researchlite {command}` does not accept a path.")
-        return command, None
-    if path is not None:
-        parser.error(f"Unrecognized command: {command!r}.")
-    return "open-path", command
 
 
 def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
@@ -278,25 +271,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         description="Run the ResearchLite RAG pipeline locally.",
         epilog=(
             "Examples:\n"
-            "  researchlite                    Open the default library.\n"
-            "  researchlite add ~/papers       Create or sync a library, then chat.\n"
-            "  researchlite use ~/papers       Switch to an existing library.\n"
-            "  researchlite sync               Incrementally sync the default library.\n"
-            "  researchlite libraries          List known libraries."
+            "  researchlite                                  Open the default library.\n"
+            "  researchlite library add ~/papers --name work  Import and open a library.\n"
+            "  researchlite library use work                  Switch libraries.\n"
+            "  researchlite library sync                      Sync the active library.\n"
+            "  researchlite library list                      List local libraries.\n"
+            "  researchlite library remove work               Forget a library."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "command_or_path",
-        nargs="?",
-        metavar="command_or_path",
-        help="Library command (add, use, sync, libraries) or a document path shorthand.",
-    )
-    parser.add_argument(
-        "path",
-        nargs="?",
-        metavar="path",
-        help="Document path required by the add and use commands.",
     )
     parser.add_argument(
         "--ext",
@@ -413,6 +395,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip LLM generation and show scored retrieval evidence only.",
     )
+    commands = parser.add_subparsers(dest="command", metavar="command")
+    library = commands.add_parser("library", help="Manage local libraries.")
+    library_actions = library.add_subparsers(dest="library_command", metavar="command")
+    add = library_actions.add_parser("add", help="Import a PDF directory and open it.")
+    add.add_argument("library_path", help="PDF directory to import.")
+    add.add_argument("--name", required=True, help="Local library name.")
+    use = library_actions.add_parser("use", help="Open a registered library.")
+    use.add_argument("library_name", help="Registered library name.")
+    sync = library_actions.add_parser("sync", help="Synchronize a registered library.")
+    sync.add_argument(
+        "library_name", nargs="?", help="Library name; defaults to the active library."
+    )
+    library_actions.add_parser("list", help="List registered libraries.")
+    remove = library_actions.add_parser("remove", help="Forget a library without deleting files.")
+    remove.add_argument("library_name", help="Registered library name.")
     return parser
 
 
@@ -426,67 +423,50 @@ def main() -> None:
 
     parser = _build_arg_parser()
     args = parser.parse_args()
-    command, command_path = _resolve_command(parser, args)
-    requested_one_click = _is_one_click_launch(args)
+    if args.command == "library" and args.library_command is None:
+        parser.error("`researchlite library` requires a command.")
     try:
         library_registry = load_library_registry()
-        effective_llm_settings = _apply_llm_defaults(args)
     except RuntimeError as exc:
         parser.error(str(exc))
 
-    if command == "libraries":
+    library_action = getattr(args, "library_command", None)
+    if library_action == "list":
         _print_libraries(library_registry)
         return
+    if library_action == "remove":
+        _require_library(parser, library_registry, args.library_name)
+        remove_library(args.library_name)
+        print(f"Removed library '{args.library_name}' from the registry.")
+        return
 
-    remember_library = command in {"add", "use", "open-path"}
-    if command == "open-default":
-        args.path = str(_require_active_library(parser, library_registry))
-        if requested_one_click:
-            args.chat = True
-    elif command == "add":
-        if any(
-            (
-                args.init_library,
-                args.refresh_library,
-                args.load_index,
-                args.save_index,
-                args.query,
-                args.chat,
-            )
-        ):
-            parser.error("`researchlite add` cannot be combined with another library action.")
-        args.path = command_path
-    elif command == "use":
-        if any(
-            (
-                args.init_library,
-                args.refresh_library,
-                args.load_index,
-                args.save_index,
-                args.query,
-            )
-        ):
-            parser.error("`researchlite use` only opens an existing library for chat.")
-        args.path = command_path
+    selected_library_name: str | None = None
+    if library_action == "add":
+        args.path = args.library_path
+        one_click_launch = True
+    elif library_action == "use":
+        args.path = str(_require_library(parser, library_registry, args.library_name))
+        selected_library_name = args.library_name
         args.chat = True
-    elif command == "sync":
-        if any(
-            (
-                args.init_library,
-                args.refresh_library,
-                args.load_index,
-                args.save_index,
-                args.query,
-                args.chat,
-            )
-        ):
-            parser.error("`researchlite sync` only synchronizes the default library.")
-        args.path = str(_require_active_library(parser, library_registry))
+        one_click_launch = False
+    elif library_action == "sync":
+        args.path = str(
+            _require_library(parser, library_registry, args.library_name)
+            if args.library_name
+            else _require_active_library(parser, library_registry)
+        )
         args.refresh_library = True
+        one_click_launch = False
     else:
-        args.path = command_path
+        args.path = str(_require_active_library(parser, library_registry))
+        one_click_launch = False
+        if _is_one_click_launch(args):
+            args.chat = True
 
-    one_click_launch = command == "add" or (command == "open-path" and requested_one_click)
+    try:
+        effective_llm_settings = _apply_llm_defaults(args)
+    except RuntimeError as exc:
+        parser.error(str(exc))
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
     current_config_fingerprint = config_fingerprint(
@@ -523,7 +503,7 @@ def main() -> None:
             args=args,
             split_config=split_config,
         )
-        register_library(library_root, synced=True)
+        register_library(library_root, name=getattr(args, "name", None), synced=True)
         if effective_llm_settings is not None:
             save_llm_settings(effective_llm_settings)
         args.chat = True
@@ -546,7 +526,7 @@ def main() -> None:
             args=args,
             split_config=split_config,
         )
-        if command == "sync":
+        if library_action == "sync":
             register_library(library_root, activate=False, synced=True)
         return
 
@@ -667,8 +647,8 @@ def main() -> None:
                 rrf_constant=args.rrf_constant,
                 reranker=reranker,
             )
-            if remember_library and has_persisted_library and not args.load_index:
-                register_library(library_root)
+            if selected_library_name is not None:
+                select_library(selected_library_name)
             if args.chat:
                 generator: RAGGenerator | None = None
                 if not args.no_generation:

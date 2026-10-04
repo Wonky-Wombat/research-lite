@@ -39,6 +39,9 @@ class LibraryRegistry:
     def active(self) -> LibraryRecord | None:
         return next((item for item in self.libraries if item.name == self.active_name), None)
 
+    def get(self, name: str) -> LibraryRecord | None:
+        return next((item for item in self.libraries if item.name == name), None)
+
 
 def registry_path() -> Path:
     override = os.environ.get("RESEARCHLITE_LIBRARY_REGISTRY_PATH")
@@ -108,6 +111,18 @@ def select_library(name: str) -> LibraryRegistry:
     if not any(item.name == library_name for item in registry.libraries):
         raise KeyError(f"No ResearchLite library named '{library_name}'.")
     updated = replace(registry, active_name=library_name)
+    save_library_registry(updated)
+    return updated
+
+
+def remove_library(name: str) -> LibraryRegistry:
+    registry = load_library_registry()
+    if registry.get(name) is None:
+        raise KeyError(f"No ResearchLite library named '{name}'.")
+    updated = LibraryRegistry(
+        None if registry.active_name == name else registry.active_name,
+        tuple(item for item in registry.libraries if item.name != name),
+    )
     save_library_registry(updated)
     return updated
 
