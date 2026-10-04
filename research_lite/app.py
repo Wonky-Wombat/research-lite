@@ -487,6 +487,11 @@ def main() -> None:
         return
 
     library_root = resolve_library_root(args.path, args.library_dir)
+    if library_action == "add":
+        try:
+            library_registry.validate_add(library_root, args.name)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     if one_click_launch:
         print("ResearchLite · Local research assistant")
@@ -503,7 +508,10 @@ def main() -> None:
             args=args,
             split_config=split_config,
         )
-        register_library(library_root, name=getattr(args, "name", None), synced=True)
+        try:
+            register_library(library_root, name=args.name, synced=True)
+        except ValueError as exc:
+            parser.error(str(exc))
         if effective_llm_settings is not None:
             save_llm_settings(effective_llm_settings)
         args.chat = True
@@ -556,8 +564,7 @@ def main() -> None:
         if not has_persisted_library:
             parser.error(
                 f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
-                "Run --refresh-library before querying, or run `researchlite <path>` once "
-                "to create and synchronize it."
+                "Run `researchlite library sync` to create and synchronize it."
             )
         service = build_default_embedding_service(
             model_name=args.model_name,

@@ -42,6 +42,16 @@ class LibraryRegistry:
     def get(self, name: str) -> LibraryRecord | None:
         return next((item for item in self.libraries if item.name == name), None)
 
+    def validate_add(self, path: Path, name: str) -> None:
+        _validate_name(name)
+        normalized = path.expanduser().resolve()
+        named = self.get(name)
+        if named is not None and named.path != normalized:
+            raise ValueError(f"Library name '{name}' already points to '{named.path}'.")
+        existing = next((item for item in self.libraries if item.path == normalized), None)
+        if existing is not None and existing.name != name:
+            raise ValueError(f"Library at '{normalized}' is already named '{existing.name}'.")
+
 
 def registry_path() -> Path:
     override = os.environ.get("RESEARCHLITE_LIBRARY_REGISTRY_PATH")
@@ -92,9 +102,7 @@ def register_library(
         if name is not None
         else (existing.name if existing is not None else _next_name(normalized, registry))
     )
-    named = next((item for item in registry.libraries if item.name == library_name), None)
-    if named is not None and named.path != normalized:
-        raise ValueError(f"Library name '{library_name}' is already in use.")
+    registry.validate_add(normalized, library_name)
     timestamp = datetime.now(UTC) if synced else (existing.last_synced_at if existing else None)
     record = LibraryRecord(library_name, normalized, timestamp)
     libraries = tuple(
