@@ -28,7 +28,7 @@ from research_lite.generation.llm_service import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
 )
-from research_lite.ingestion import IngestReport, load_documents
+from research_lite.ingestion import SUPPORTED_EXTENSIONS, IngestReport, load_documents
 from research_lite.library_lock import LibraryRefreshLockedError
 from research_lite.library_refresh import RefreshResult, refresh_library
 from research_lite.library_registry import (
@@ -49,6 +49,7 @@ from research_lite.retrieval import (
     RetrievalMode,
 )
 from research_lite.settings import LLMSettings, load_llm_settings, save_llm_settings
+from research_lite.utils.loader_utils import discover_files
 from research_lite.vectorstore import FaissVectorStore
 
 
@@ -488,10 +489,14 @@ def main() -> None:
 
     library_root = resolve_library_root(args.path, args.library_dir)
     if library_action == "add":
+        if not Path(args.path).expanduser().is_dir():
+            parser.error(f"Library path '{args.path}' must be an existing directory.")
         try:
             library_registry.validate_add(library_root, args.name)
         except ValueError as exc:
             parser.error(str(exc))
+        if not discover_files(str(library_root), args.extensions or SUPPORTED_EXTENSIONS):
+            parser.error(f"No supported documents found in '{library_root}'.")
 
     if one_click_launch:
         print("ResearchLite · Local research assistant")
@@ -508,6 +513,18 @@ def main() -> None:
             args=args,
             split_config=split_config,
         )
+        manifest = IngestionManifest.open(library_root)
+        try:
+            indexed = any(source.has_indexed_content for source in manifest.list_sources())
+        finally:
+            manifest.close()
+        index_dir = library_root / ".researchlite"
+        if not indexed or not all(
+            (index_dir / f"{args.index_name}.{suffix}").is_file() for suffix in ("faiss", "pkl")
+        ):
+            parser.error(
+                f"No documents were indexed in '{library_root}'. Check the files and retry."
+            )
         try:
             register_library(library_root, name=args.name, synced=True)
         except ValueError as exc:
