@@ -122,14 +122,16 @@ class IngestionManifest:
             raise RuntimeError(msg)
         connection.executescript(SCHEMA)
 
-        connection.execute(
-            "INSERT OR IGNORE INTO library_state(key, value) VALUES ('initialized_at', ?)",
-            (_utc_now(),),
-        )
+        for key, value in {
+            "initialized_at": _utc_now(),
+            "config_fingerprint": current_config_fingerprint,
+        }.items():
+            connection.execute(
+                "INSERT OR IGNORE INTO library_state(key, value) VALUES (?, ?)", (key, value)
+            )
         for key, value in {
             "schema_version": SCHEMA_VERSION,
             "library_root": str(library_root.expanduser().resolve()),
-            "config_fingerprint": current_config_fingerprint,
         }.items():
             connection.execute(
                 "INSERT INTO library_state(key, value) VALUES (?, ?) "
