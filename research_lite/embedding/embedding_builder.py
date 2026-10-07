@@ -7,11 +7,12 @@
 
 from __future__ import annotations
 
+from research_lite.defaults import DEFAULT_EMBEDDING_MODEL
 from research_lite.model_loading import silence_transformers_progress
 
 from . import EmbeddingConfig, EmbeddingService
 
-DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_MODEL_NAME = DEFAULT_EMBEDDING_MODEL
 
 
 def build_default_embedding_service(

@@ -14,23 +14,17 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import argparse
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
-from research_lite.embedding import EmbeddedDocument, EmbeddingService
-from research_lite.embedding.embedding_builder import (
-    DEFAULT_MODEL_NAME,
-    build_default_embedding_service,
-)
-from research_lite.generation import RAGGenerator
-from research_lite.generation.llm_service import (
+from research_lite.defaults import (
+    DEFAULT_EMBEDDING_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
+    DEFAULT_RERANKER_MODEL,
 )
-from research_lite.ingestion import SUPPORTED_EXTENSIONS, IngestReport, load_documents
-from research_lite.library_lock import LibraryRefreshLockedError
-from research_lite.library_refresh import RefreshResult, refresh_library
 from research_lite.library_registry import (
     LibraryRegistry,
     load_library_registry,
@@ -38,19 +32,17 @@ from research_lite.library_registry import (
     remove_library,
     select_library,
 )
-from research_lite.library_stats import inspect_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
-from research_lite.preprocessing import SplitConfig, split_documents
-from research_lite.query_session import LibraryQuerySession, format_evidence
-from research_lite.retrieval import (
-    DEFAULT_RERANKER_MODEL,
-    CrossEncoderReranker,
-    RerankerUnavailableError,
-    RetrievalMode,
-)
 from research_lite.settings import LLMSettings, load_llm_settings, save_llm_settings
-from research_lite.utils.loader_utils import discover_files
-from research_lite.vectorstore import FaissVectorStore
+
+if TYPE_CHECKING:
+    from research_lite.embedding import EmbeddedDocument, EmbeddingService
+    from research_lite.generation import RAGGenerator
+    from research_lite.ingestion import IngestReport
+    from research_lite.library_refresh import RefreshResult
+    from research_lite.preprocessing import SplitConfig
+    from research_lite.retrieval import RetrievalMode
+    from research_lite.vectorstore import FaissVectorStore
 
 
 def ingest_and_embed(
@@ -59,13 +51,18 @@ def ingest_and_embed(
     extensions: Iterable[str] | None = None,
     split_config: SplitConfig | None = None,
     embedding_service: EmbeddingService | None = None,
-    model_name: str = DEFAULT_MODEL_NAME,
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
     device: str = "cpu",
     batch_size: int = 32,
     local_files_only: bool = False,
     ingest_report: IngestReport | None = None,
 ) -> tuple[list[EmbeddedDocument], FaissVectorStore | None, EmbeddingService | None]:
     """Run the load -> split -> embed pipeline for the provided path."""
+    from research_lite.embedding.embedding_builder import build_default_embedding_service
+    from research_lite.ingestion import load_documents
+    from research_lite.preprocessing import SplitConfig, split_documents
+    from research_lite.vectorstore import FaissVectorStore
+
     documents = load_documents(path, extensions=extensions, report=ingest_report)
     if not documents:
         return [], None, embedding_service
@@ -103,6 +100,8 @@ def load_persisted_library(
     index_name: str = "index",
 ) -> FaissVectorStore:
     """Load a library created by ``--refresh-library`` without re-embedding it."""
+    from research_lite.vectorstore import FaissVectorStore
+
     manifest = IngestionManifest.open(library_root)
     try:
         recorded_config_fingerprint = manifest.state_value("config_fingerprint")
@@ -178,6 +177,10 @@ def _refresh_library(
     split_config: SplitConfig,
 ) -> None:
     """Run the explicit write phase used by refresh and one-click startup."""
+    from research_lite.embedding.embedding_builder import build_default_embedding_service
+    from research_lite.library_lock import LibraryRefreshLockedError
+    from research_lite.library_refresh import refresh_library
+
     refresh_service = build_default_embedding_service(
         model_name=args.model_name,
         device=args.device,
@@ -287,7 +290,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="append",
         help="File extensions to include (defaults to all supported).",
     )
-    parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
+    parser.add_argument("--model-name", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
@@ -440,6 +443,16 @@ def main() -> None:
         remove_library(args.library_name)
         print(f"Removed library '{args.library_name}' from the registry.")
         return
+
+    from research_lite.embedding.embedding_builder import build_default_embedding_service
+    from research_lite.generation import RAGGenerator
+    from research_lite.ingestion import SUPPORTED_EXTENSIONS, IngestReport
+    from research_lite.library_stats import inspect_library
+    from research_lite.preprocessing import SplitConfig
+    from research_lite.query_session import LibraryQuerySession, format_evidence
+    from research_lite.retrieval import CrossEncoderReranker, RerankerUnavailableError
+    from research_lite.utils.loader_utils import discover_files
+    from research_lite.vectorstore import FaissVectorStore
 
     selected_library_name: str | None = None
     if library_action == "add":

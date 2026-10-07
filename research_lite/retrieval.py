@@ -17,11 +17,11 @@ from typing import Literal, Protocol, cast
 
 from langchain_core.documents import Document
 
+from research_lite.defaults import DEFAULT_RERANKER_MODEL
 from research_lite.model_loading import silence_transformers_progress
 from research_lite.vectorstore import FaissVectorStore
 
 RetrievalMode = Literal["dense", "hybrid", "hybrid-rerank"]
-DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 
 
 class _CrossEncoder(Protocol):

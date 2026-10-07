@@ -15,8 +15,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from research_lite.preprocessing import SplitConfig
+if TYPE_CHECKING:
+    from research_lite.preprocessing import SplitConfig
 
 SCHEMA_VERSION = "2"
 

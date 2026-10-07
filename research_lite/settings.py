@@ -14,7 +14,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from research_lite.generation.llm_service import DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL
+from research_lite.defaults import DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL
 
 DEFAULT_LLM_PROVIDER = "ollama"
 

@@ -26,6 +26,11 @@ except ImportError:
 from langchain_openai import ChatOpenAI
 
 from research_lite.citations import citation_number_by_source
+from research_lite.defaults import (
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OPENAI_MODEL,
+)
 
 ChatOllama: Any = None
 try:
@@ -35,10 +40,6 @@ try:
 except ImportError:  # pragma: no cover - exercised only in incomplete installations.
     pass
 
-
-DEFAULT_OPENAI_MODEL = "gpt-5-mini"
-DEFAULT_OLLAMA_MODEL = "llama3.2"
-DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are ResearchLite, a helpful assistant powered by a lightweight RAG system.\n"
