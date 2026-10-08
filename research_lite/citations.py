@@ -58,9 +58,14 @@ def citation_number_by_source(documents: Sequence[Document]) -> dict[str, int]:
     }
 
 
-def page_label(metadata: Mapping[str, object]) -> str:
+def page_number(metadata: Mapping[str, object]) -> int | None:
     source_unit = str(metadata.get("source_unit", ""))
-    if not source_unit.startswith("page-"):
-        return ""
     page = source_unit.removeprefix("page-")
-    return f", page {int(page) + 1}" if page.isdigit() else ""
+    if not source_unit.startswith("page-") or not page.isdigit():
+        return None
+    return int(page) + 1
+
+
+def page_label(metadata: Mapping[str, object]) -> str:
+    page = page_number(metadata)
+    return "" if page is None else f", page {page}"

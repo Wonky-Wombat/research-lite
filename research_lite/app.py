@@ -12,6 +12,7 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -310,6 +311,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=("Base URL for the LLM service. Defaults to the saved local setting."),
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --query, print retrieved evidence as JSON and skip LLM generation.",
+    )
+    parser.add_argument(
         "--no-generation",
         action="store_true",
         help="Skip LLM generation and show retrieved evidence only.",
@@ -344,6 +350,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "library" and args.library_command is None:
         parser.error("`researchlite library` requires a command.")
+    if args.json and not args.query:
+        parser.error("--json requires --query.")
     try:
         library_registry = load_library_registry()
     except RuntimeError as exc:
@@ -363,7 +371,7 @@ def main() -> None:
     from research_lite.ingestion import SUPPORTED_EXTENSIONS
     from research_lite.library_stats import inspect_library
     from research_lite.preprocessing import SplitConfig
-    from research_lite.query_session import LibraryQuerySession, format_evidence
+    from research_lite.query_session import LibraryQuerySession, evidence_json, format_evidence
     from research_lite.retrieval import CrossEncoderReranker, RerankerUnavailableError
     from research_lite.utils.loader_utils import discover_files
 
@@ -479,7 +487,8 @@ def main() -> None:
             current_config_fingerprint=current_config_fingerprint,
             embedding_service=service,
         )
-        print(f"Loaded ResearchLite library index from '{library_root}'.")
+        if not args.json:
+            print(f"Loaded ResearchLite library index from '{library_root}'.")
     except (FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
 
@@ -537,6 +546,10 @@ def main() -> None:
             generate_answer=generator.generate_answer if generator else None,
             library_stats=library_stats,
         ).run()
+        return
+
+    if args.json:
+        print(json.dumps(evidence_json(args.query, session.query(args.query)), ensure_ascii=False))
         return
 
     print(f"Running {retrieval_mode} search for query: {args.query!r}")

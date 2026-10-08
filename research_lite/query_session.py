@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.documents import Document
 
-from research_lite.citations import citation_number_by_source, page_label
+from research_lite.citations import citation_number_by_source, page_label, page_number
 from research_lite.embedding import EmbeddingService
 from research_lite.retrieval import (
     CrossEncoderReranker,
@@ -99,3 +99,32 @@ def format_evidence(documents: Sequence[Document]) -> list[str]:
         citation_number = citation_numbers.get(source_path or str(title), 0)
         output.append(f"[{citation_number}] {title}{page_label(document.metadata)}\n  {preview}")
     return output
+
+
+def evidence_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
+    citation_numbers = citation_number_by_source(outcome.documents)
+    results = []
+    for rank, document in enumerate(outcome.documents, start=1):
+        metadata = document.metadata
+        source_path = str(metadata.get("source_path", ""))
+        title = str(metadata.get("title", "Unknown"))
+        results.append(
+            {
+                "rank": rank,
+                "citation": citation_numbers.get(source_path or title, 0),
+                "title": title,
+                "path": source_path,
+                "page": page_number(metadata),
+                "chunk_id": metadata.get("chunk_id"),
+                "text": document.page_content,
+            }
+        )
+    warnings = (
+        ["Reranker unavailable; used hybrid retrieval."] if outcome.reranker_unavailable else []
+    )
+    return {
+        "query": question,
+        "retrieval_mode": outcome.retrieval_mode,
+        "warnings": warnings,
+        "results": results,
+    }
