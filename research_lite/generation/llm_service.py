@@ -14,32 +14,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from langchain_core.documents import Document
-from langchain_core.language_models import BaseChatModel
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-
-try:
-    from langchain_core.pydantic_v1 import SecretStr
-except ImportError:
-    from pydantic import SecretStr
-
-from langchain_openai import ChatOpenAI
 
 from research_lite.citations import citation_number_by_source, page_label
 from research_lite.defaults import (
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OPENAI_BASE_URL,
     DEFAULT_OPENAI_MODEL,
 )
-
-ChatOllama: Any = None
-try:
-    from langchain_ollama import ChatOllama as _chat_ollama
-
-    ChatOllama = _chat_ollama
-except ImportError:  # pragma: no cover - exercised only in incomplete installations.
-    pass
-
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are ResearchLite, a helpful assistant powered by a lightweight RAG system.\n"
@@ -50,10 +32,15 @@ DEFAULT_SYSTEM_PROMPT = (
     "or metadata.\n\n"
     "Context:\n{context}"
 )
+REQUEST_TIMEOUT_SECONDS = 120
 
 
 class OllamaUnavailableError(RuntimeError):
     """Raised when the selected Ollama service or model cannot be used."""
+
+
+class LLMRequestError(RuntimeError):
+    pass
 
 
 def _ollama_base_url(base_url: str | None) -> str:
@@ -88,6 +75,31 @@ def _validate_ollama(model_name: str, base_url: str) -> None:
         )
 
 
+def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    request = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310
+            body: dict[str, Any] = json.loads(response.read())
+            return body
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:300]
+        raise LLMRequestError(f"LLM request failed with HTTP {exc.code}: {detail}") from exc
+    except (URLError, TimeoutError) as exc:
+        raise LLMRequestError(f"Could not reach the LLM service at {url}.") from exc
+    except json.JSONDecodeError as exc:
+        raise LLMRequestError(f"LLM service at {url} returned invalid JSON.") from exc
+
+
+def _supports_temperature(model_name: str) -> bool:
+    model = model_name.lower()
+    return not (model.startswith("gpt-5") and "chat" not in model)
+
+
 class RAGGenerator:
     def __init__(
         self,
@@ -100,37 +112,22 @@ class RAGGenerator:
         if provider not in {"openai", "ollama"}:
             raise ValueError(f"Unsupported LLM provider: {provider!r}")
 
-        final_api_key: SecretStr | None = None
-        if provider == "openai" and api_key is not None:
-            final_api_key = SecretStr(api_key)
-
+        self._provider = provider
+        self._temperature = temperature
+        self._headers: dict[str, str] = {}
         if provider == "ollama":
-            if ChatOllama is None:
-                raise RuntimeError(
-                    "Ollama support is not installed. Run `pip install -r requirements.txt`."
-                )
-            final_model_name = model_name or DEFAULT_OLLAMA_MODEL
-            ollama_url = _ollama_base_url(base_url)
-            _validate_ollama(final_model_name, ollama_url)
-            self._llm: BaseChatModel = ChatOllama(
-                model=final_model_name,
-                base_url=ollama_url,
-                temperature=temperature,
-            )
+            self._model = model_name or DEFAULT_OLLAMA_MODEL
+            self._base_url = _ollama_base_url(base_url)
+            _validate_ollama(self._model, self._base_url)
         else:
-            self._llm = ChatOpenAI(
-                model=model_name or DEFAULT_OPENAI_MODEL,
-                api_key=final_api_key,
-                base_url=base_url,
-                temperature=temperature,
-            )
-        self._prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", DEFAULT_SYSTEM_PROMPT),
-                ("human", "{question}"),
-            ]
-        )
-        self._chain = self._prompt | self._llm | StrOutputParser()
+            if api_key is None and base_url is None:
+                raise ValueError(
+                    "An OpenAI API key is required. Set OPENAI_API_KEY or pass --llm-api-key."
+                )
+            self._model = model_name or DEFAULT_OPENAI_MODEL
+            self._base_url = (base_url or DEFAULT_OPENAI_BASE_URL).rstrip("/")
+            if api_key:
+                self._headers["Authorization"] = f"Bearer {api_key}"
 
     def generate_answer(self, query: str, context_documents: Iterable[Document]) -> str | None:
         """Generate an answer based on the query and retrieved documents."""
@@ -143,9 +140,33 @@ class RAGGenerator:
             citation_number = citation_numbers.get(source_path or title, 0)
             location = page_label(document.metadata)
             context_items.append(f"[{citation_number}] {title}{location}\n{document.page_content}")
-        context_text = "\n\n".join(context_items)
+        messages = [
+            {
+                "role": "system",
+                "content": DEFAULT_SYSTEM_PROMPT.format(context="\n\n".join(context_items)),
+            },
+            {"role": "user", "content": query},
+        ]
 
-        result = self._chain.invoke({"question": query, "context": context_text})
-        if isinstance(result, str):
-            return result
-        return None
+        try:
+            if self._provider == "ollama":
+                response = _post_json(
+                    f"{self._base_url}/api/chat",
+                    {
+                        "model": self._model,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"temperature": self._temperature},
+                    },
+                    self._headers,
+                )
+                content = response["message"]["content"]
+            else:
+                payload: dict[str, Any] = {"model": self._model, "messages": messages}
+                if _supports_temperature(self._model):
+                    payload["temperature"] = self._temperature
+                response = _post_json(f"{self._base_url}/chat/completions", payload, self._headers)
+                content = response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMRequestError("LLM service returned an unexpected response.") from exc
+        return content if isinstance(content, str) else None
