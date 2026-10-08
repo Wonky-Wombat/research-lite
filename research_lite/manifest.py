@@ -117,7 +117,7 @@ class IngestionManifest:
             connection.close()
             msg = (
                 f"Manifest at {state_dir} uses schema version {existing_schema_version}. "
-                "Delete .researchlite and run --init-library again."
+                "Delete .researchlite and run `researchlite library sync` again."
             )
             raise RuntimeError(msg)
         connection.executescript(SCHEMA)
@@ -147,7 +147,10 @@ class IngestionManifest:
         state_dir = library_root.expanduser().resolve() / ".researchlite"
         database_path = state_dir / "manifest.sqlite"
         if not database_path.is_file():
-            msg = f"No ResearchLite manifest found at {database_path}. Run --init-library first."
+            msg = (
+                f"No ResearchLite manifest found at {database_path}. "
+                "Run `researchlite library sync` first."
+            )
             raise FileNotFoundError(msg)
 
         connection = _connect(database_path)
@@ -161,7 +164,7 @@ class IngestionManifest:
             if str(schema_version["value"]) != SCHEMA_VERSION:
                 msg = (
                     f"Unsupported manifest schema version at {database_path}. "
-                    "Delete .researchlite and run --init-library again."
+                    "Delete .researchlite and run `researchlite library sync` again."
                 )
                 raise RuntimeError(msg)
         except Exception:

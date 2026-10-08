@@ -112,7 +112,7 @@ def load_persisted_library(
     if recorded_config_fingerprint != current_config_fingerprint:
         msg = (
             f"Library at '{library_root}' was indexed with different embedding or chunking "
-            "settings. Re-run --refresh-library with the settings used to query it."
+            "settings. Run `researchlite library sync` with the settings used to query it."
         )
         raise RuntimeError(msg)
 
@@ -120,7 +120,7 @@ def load_persisted_library(
     if not index_path.is_file():
         msg = (
             f"No persisted FAISS index found at '{index_path}'. "
-            "Run --refresh-library before querying this library."
+            "Run `researchlite library sync` before querying this library."
         )
         raise FileNotFoundError(msg)
 
@@ -399,13 +399,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-generation",
         action="store_true",
-        help="Skip LLM generation and show scored retrieval evidence only.",
+        help="Skip LLM generation and show retrieved evidence only.",
     )
     commands = parser.add_subparsers(dest="command", metavar="command")
     library = commands.add_parser("library", help="Manage local libraries.")
     library_actions = library.add_subparsers(dest="library_command", metavar="command")
-    add = library_actions.add_parser("add", help="Import a PDF directory and open it.")
-    add.add_argument("library_path", help="PDF directory to import.")
+    add = library_actions.add_parser("add", help="Import a document directory and open it.")
+    add.add_argument("library_path", help="Document directory to import.")
     add.add_argument("--name", required=True, help="Local library name.")
     use = library_actions.add_parser("use", help="Open a registered library.")
     use.add_argument("library_name", help="Registered library name.")
