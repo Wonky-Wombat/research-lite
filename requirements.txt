@@ -10,8 +10,8 @@ prompt_toolkit
 pypdf
 pytest
 docx2txt
-unstructured
 jq
-pandas
-msoffcrypto-tool
 fastembed
+python-calamine
+beautifulsoup4
+markdownify
