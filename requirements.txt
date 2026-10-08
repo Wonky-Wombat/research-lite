@@ -8,7 +8,6 @@ python-dotenv
 prompt_toolkit
 pypdf
 docx2txt
-jq
 fastembed
 python-calamine
 beautifulsoup4

@@ -11,7 +11,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from langchain_community.document_loaders import TextLoader
 from langchain_core.documents import Document
 
 
@@ -91,12 +90,11 @@ def load_text_by_ext(path: str, ext: str) -> list[Document]:
     text_files = iter_files(path=path, extensions=[ext])
     documents: list[Document] = []
     for text_file in text_files:
-        source_metadata = build_source_metadata(text_file)
-        loader = TextLoader(str(text_file), encoding="utf-8")
-        for source_unit_index, document in enumerate(loader.load()):
+        document = Document(page_content=text_file.read_text(encoding="utf-8"))
+        documents.append(
             populate_document_metadata(
-                document, source_metadata, source_unit_index=source_unit_index
+                document, build_source_metadata(text_file), source_unit_index=0
             )
-            documents.append(document)
+        )
 
     return documents
