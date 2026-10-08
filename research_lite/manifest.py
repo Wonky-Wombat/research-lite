@@ -236,9 +236,15 @@ class IngestionManifest:
         path: str | Path,
         source_id: str | None,
         error_message: str,
+        keep_indexed_version: bool = True,
     ) -> None:
-        """Record a failed refresh without replacing a prior indexed version."""
+        """Record a failed refresh, keeping any prior indexed version unless told otherwise."""
         now = _utc_now()
+        forget_indexed_version = (
+            ""
+            if keep_indexed_version
+            else ", indexed_source_id = NULL, indexed_config_fingerprint = NULL, indexed_at = NULL"
+        )
         self._connection.execute(
             "INSERT INTO sources("
             "canonical_path, indexed_source_id, indexed_config_fingerprint, indexed_at, "
@@ -247,7 +253,7 @@ class IngestionManifest:
             "ON CONFLICT(canonical_path) DO UPDATE SET "
             "last_attempt_source_id = excluded.last_attempt_source_id, "
             "last_attempt_at = excluded.last_attempt_at, "
-            "last_refresh_error = excluded.last_refresh_error",
+            "last_refresh_error = excluded.last_refresh_error" + forget_indexed_version,
             (_canonical_path(path), source_id, now, error_message),
         )
         self._connection.commit()

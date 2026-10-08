@@ -112,8 +112,10 @@ def _apply_refresh_plan(
     try:
         result = RefreshResult(plan=plan)
         pending_sources = [*plan.new, *plan.changed]
+        rebuild = plan.configuration_changed
+        index_files = [manifest.state_dir / f"{index_name}.{suffix}" for suffix in ("faiss", "pkl")]
         vector_store: FaissVectorStore | None = None
-        if (manifest.state_dir / f"{index_name}.faiss").is_file():
+        if not rebuild and index_files[0].is_file():
             vector_store = FaissVectorStore.load(
                 manifest.state_dir,
                 embedding_backend=embedding_service.backend,
@@ -141,7 +143,7 @@ def _apply_refresh_plan(
                 result.failed_sources.append(source_file)
                 failed_source_messages.append((source_file, str(exc)))
 
-        removal_paths = [*plan.deleted, *successful_changed]
+        removal_paths = [] if rebuild else [*plan.deleted, *successful_changed]
         if vector_store is not None and removal_paths:
             result.deleted_chunks = vector_store.delete_by_source_paths(removal_paths)
         if replacements:
@@ -155,6 +157,9 @@ def _apply_refresh_plan(
                 result.added_chunks = len(replacements)
         if vector_store is not None and (removal_paths or replacements):
             vector_store.save(manifest.state_dir, index_name=index_name)
+        elif rebuild:
+            for index_file in index_files:
+                index_file.unlink(missing_ok=True)
 
         for source_file in plan.deleted:
             manifest.remove_source(source_file)
@@ -174,9 +179,17 @@ def _apply_refresh_plan(
                 path=source_file,
                 source_id=source_id,
                 error_message=error_message or "Could not load, split, or embed this source.",
+                keep_indexed_version=not rebuild,
             )
 
-        if plan.configuration_changed and not result.failed_sources and not plan.failed:
+        if rebuild:
+            for failure in plan.failed:
+                manifest.record_refresh_failure(
+                    path=failure.path,
+                    source_id=None,
+                    error_message=failure.reason,
+                    keep_indexed_version=False,
+                )
             manifest.set_state_value("config_fingerprint", current_config_fingerprint)
         return result
     finally:
