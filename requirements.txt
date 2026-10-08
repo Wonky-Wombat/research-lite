@@ -1,6 +1,5 @@
 faiss-cpu
 filelock
-langchain
 langchain-community
 langchain-text-splitters
 langchain-openai
@@ -8,7 +7,6 @@ langchain-ollama
 python-dotenv
 prompt_toolkit
 pypdf
-pytest
 docx2txt
 jq
 fastembed
