@@ -25,7 +25,7 @@ except ImportError:
 
 from langchain_openai import ChatOpenAI
 
-from research_lite.citations import citation_number_by_source
+from research_lite.citations import citation_number_by_source, page_label
 from research_lite.defaults import (
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_OLLAMA_MODEL,
@@ -141,7 +141,8 @@ class RAGGenerator:
             source_path = str(document.metadata.get("source_path", ""))
             title = str(document.metadata.get("title", "Unknown"))
             citation_number = citation_numbers.get(source_path or title, 0)
-            context_items.append(f"[{citation_number}] {title}\n{document.page_content}")
+            location = page_label(document.metadata)
+            context_items.append(f"[{citation_number}] {title}{location}\n{document.page_content}")
         context_text = "\n\n".join(context_items)
 
         result = self._chain.invoke({"question": query, "context": context_text})

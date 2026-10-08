@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.documents import Document
 
-from research_lite.citations import citation_number_by_source
+from research_lite.citations import citation_number_by_source, page_label
 from research_lite.embedding import EmbeddingService
 from research_lite.retrieval import (
     CrossEncoderReranker,
@@ -97,7 +97,5 @@ def format_evidence(documents: Sequence[Document]) -> list[str]:
         source_path = str(document.metadata.get("source_path", ""))
         title = document.metadata.get("title", "Unknown")
         citation_number = citation_numbers.get(source_path or str(title), 0)
-        source_unit = document.metadata.get("source_unit")
-        unit_suffix = f", page {source_unit}" if source_unit is not None else ""
-        output.append(f"[{citation_number}] {title}{unit_suffix}\n  {preview}")
+        output.append(f"[{citation_number}] {title}{page_label(document.metadata)}\n  {preview}")
     return output

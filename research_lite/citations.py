@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from langchain_core.documents import Document
 
@@ -56,3 +56,11 @@ def citation_number_by_source(documents: Sequence[Document]) -> dict[str, int]:
     return {
         source.source_path or source.title: source.number for source in citation_sources(documents)
     }
+
+
+def page_label(metadata: Mapping[str, object]) -> str:
+    source_unit = str(metadata.get("source_unit", ""))
+    if not source_unit.startswith("page-"):
+        return ""
+    page = source_unit.removeprefix("page-")
+    return f", page {int(page) + 1}" if page.isdigit() else ""
