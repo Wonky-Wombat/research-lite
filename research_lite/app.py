@@ -447,7 +447,6 @@ def main() -> None:
         return
 
     from research_lite.embedding.embedding_builder import build_default_embedding_service
-    from research_lite.generation import RAGGenerator
     from research_lite.ingestion import SUPPORTED_EXTENSIONS, IngestReport
     from research_lite.library_stats import inspect_library
     from research_lite.preprocessing import SplitConfig
@@ -691,6 +690,8 @@ def main() -> None:
             if args.chat:
                 generator: RAGGenerator | None = None
                 if not args.no_generation:
+                    from research_lite.generation import RAGGenerator
+
                     try:
                         generator = RAGGenerator(
                             model_name=args.llm_model,
@@ -727,6 +728,8 @@ def main() -> None:
                     print(evidence)
 
                 if not args.no_generation:
+                    from research_lite.generation import RAGGenerator
+
                     print("\nGenerating answer...")
                     try:
                         # Ensure we pass the cleaned key if it wasn't passed via args
