@@ -62,10 +62,17 @@ def refresh_library(
                 current_config_fingerprint=current_config_fingerprint,
                 extensions=normalized_extensions,
             )
+            has_indexed_content = any(
+                record.has_indexed_content for record in manifest.list_sources()
+            )
         finally:
             manifest.close()
         if not plan.new and not plan.changed and not plan.deleted:
             return RefreshResult(plan=plan)
+        index_path = state_dir / f"{index_name}.faiss"
+        if has_indexed_content and not index_path.is_file():
+            msg = f"Missing FAISS index at {index_path}; cannot safely refresh this library."
+            raise FileNotFoundError(msg)
 
         backup = RefreshBackup.create(state_dir)
         try:
@@ -105,19 +112,14 @@ def _apply_refresh_plan(
     try:
         result = RefreshResult(plan=plan)
         pending_sources = [*plan.new, *plan.changed]
-        existing_records = manifest.list_sources()
-        index_path = manifest.state_dir / f"{index_name}.faiss"
         vector_store: FaissVectorStore | None = None
-        if index_path.is_file():
+        if (manifest.state_dir / f"{index_name}.faiss").is_file():
             vector_store = FaissVectorStore.load(
                 manifest.state_dir,
                 embedding_backend=embedding_service.backend,
                 index_name=index_name,
                 allow_dangerous_deserialization=True,
             )
-        elif any(record.has_indexed_content for record in existing_records):
-            msg = f"Missing FAISS index at {index_path}; cannot safely refresh this library."
-            raise FileNotFoundError(msg)
 
         replacements: list[EmbeddedDocument] = []
         successful_changed: list[Path] = []

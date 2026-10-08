@@ -198,7 +198,7 @@ def _refresh_library(
             extensions=args.extensions,
             index_name=args.index_name,
         )
-    except LibraryRefreshLockedError as exc:
+    except (LibraryRefreshLockedError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
     _print_refresh_result(result)
 
