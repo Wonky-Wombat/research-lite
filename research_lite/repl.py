@@ -155,7 +155,4 @@ class TerminalChat:
 
     @staticmethod
     def _is_library_count_question(question: str) -> bool:
-        return bool(_COUNT_QUESTION.search(question)) or (
-            "多少" in question
-            and any(word in question.lower() for word in ("论文", "文献", "pdf", "文件"))
-        )
+        return bool(_COUNT_QUESTION.search(question))
