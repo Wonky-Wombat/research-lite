@@ -18,22 +18,18 @@ from typing import Literal, Protocol, cast
 from langchain_core.documents import Document
 
 from research_lite.defaults import DEFAULT_RERANKER_MODEL
-from research_lite.model_loading import silence_transformers_progress
+from research_lite.model_loading import model_cache_dir, silence_model_downloads, use_cuda
 from research_lite.vectorstore import FaissVectorStore
 
 RetrievalMode = Literal["dense", "hybrid", "hybrid-rerank"]
 
 
 class _CrossEncoder(Protocol):
-    """Minimal interface used from sentence-transformers' cross-encoder."""
+    """Minimal interface used from fastembed's cross-encoder."""
 
-    def predict(
-        self,
-        sentences: list[tuple[str, str]],
-        *,
-        batch_size: int,
-        show_progress_bar: bool,
-    ) -> Sequence[float]: ...
+    def rerank(
+        self, query: str, documents: Iterable[str], batch_size: int = 64
+    ) -> Iterable[float]: ...
 
 
 class RerankerUnavailableError(RuntimeError):
@@ -167,12 +163,13 @@ class CrossEncoderReranker:
     def _get_model(self) -> object:
         if self._model is None:
             try:
-                from sentence_transformers import CrossEncoder
+                from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-                silence_transformers_progress()
-                self._model = CrossEncoder(
+                silence_model_downloads()
+                self._model = TextCrossEncoder(
                     self._model_name,
-                    device=self._device,
+                    cache_dir=model_cache_dir(),
+                    cuda=use_cuda(self._device),
                     local_files_only=self._local_files_only,
                 )
             except Exception as exc:
@@ -189,10 +186,12 @@ class CrossEncoderReranker:
         if not documents:
             return []
         model = cast(_CrossEncoder, self._get_model())
-        scores = model.predict(
-            [(query, document.page_content) for document in documents],
-            batch_size=self._batch_size,
-            show_progress_bar=False,
+        scores = list(
+            model.rerank(
+                query,
+                [document.page_content for document in documents],
+                batch_size=self._batch_size,
+            )
         )
         ranked = sorted(
             zip(documents, scores, strict=True), key=lambda item: float(item[1]), reverse=True

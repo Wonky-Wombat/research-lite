@@ -1,4 +1,3 @@
-torch
 faiss-cpu
 filelock
 langchain
@@ -10,10 +9,9 @@ python-dotenv
 prompt_toolkit
 pypdf
 pytest
-sentence-transformers
-langchain-huggingface
 docx2txt
 unstructured
 jq
 pandas
 msoffcrypto-tool
+fastembed
