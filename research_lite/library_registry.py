@@ -18,6 +18,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from filelock import FileLock
+
 from research_lite.settings import settings_path
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
@@ -94,6 +96,13 @@ def register_library(
     activate: bool = True,
     synced: bool = False,
 ) -> LibraryRegistry:
+    with _registry_lock():
+        return _register_library(path, name=name, activate=activate, synced=synced)
+
+
+def _register_library(
+    path: Path, *, name: str | None, activate: bool, synced: bool
+) -> LibraryRegistry:
     registry = load_library_registry()
     normalized = path.expanduser().resolve()
     existing = next((item for item in registry.libraries if item.path == normalized), None)
@@ -114,25 +123,33 @@ def register_library(
 
 
 def select_library(name: str) -> LibraryRegistry:
-    registry = load_library_registry()
-    library_name = _validate_name(name)
-    if not any(item.name == library_name for item in registry.libraries):
-        raise KeyError(f"No ResearchLite library named '{library_name}'.")
-    updated = replace(registry, active_name=library_name)
-    save_library_registry(updated)
-    return updated
+    with _registry_lock():
+        registry = load_library_registry()
+        library_name = _validate_name(name)
+        if not any(item.name == library_name for item in registry.libraries):
+            raise KeyError(f"No ResearchLite library named '{library_name}'.")
+        updated = replace(registry, active_name=library_name)
+        save_library_registry(updated)
+        return updated
 
 
 def remove_library(name: str) -> LibraryRegistry:
-    registry = load_library_registry()
-    if registry.get(name) is None:
-        raise KeyError(f"No ResearchLite library named '{name}'.")
-    updated = LibraryRegistry(
-        None if registry.active_name == name else registry.active_name,
-        tuple(item for item in registry.libraries if item.name != name),
-    )
-    save_library_registry(updated)
-    return updated
+    with _registry_lock():
+        registry = load_library_registry()
+        if registry.get(name) is None:
+            raise KeyError(f"No ResearchLite library named '{name}'.")
+        updated = LibraryRegistry(
+            None if registry.active_name == name else registry.active_name,
+            tuple(item for item in registry.libraries if item.name != name),
+        )
+        save_library_registry(updated)
+        return updated
+
+
+def _registry_lock() -> FileLock:
+    path = registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileLock(str(path.with_name(f"{path.name}.lock")))
 
 
 def _legacy_registry() -> LibraryRegistry:
