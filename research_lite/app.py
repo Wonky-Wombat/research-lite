@@ -181,17 +181,19 @@ def _refresh_library(
     from research_lite.library_lock import LibraryRefreshLockedError
     from research_lite.library_refresh import refresh_library
 
-    refresh_service = build_default_embedding_service(
-        model_name=args.model_name,
-        device=args.device,
-        batch_size=args.batch_size,
-        local_files_only=args.local_files_only,
-    )
+    def load_embedding_service() -> EmbeddingService:
+        return build_default_embedding_service(
+            model_name=args.model_name,
+            device=args.device,
+            batch_size=args.batch_size,
+            local_files_only=args.local_files_only,
+        )
+
     try:
         result = refresh_library(
             library_root,
             current_config_fingerprint=current_config_fingerprint,
-            embedding_service=refresh_service,
+            load_embedding_service=load_embedding_service,
             split_config=split_config,
             extensions=args.extensions,
             index_name=args.index_name,

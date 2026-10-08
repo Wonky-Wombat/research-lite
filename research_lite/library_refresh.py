@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def refresh_library(
     library_root: Path,
     *,
     current_config_fingerprint: str,
-    embedding_service: EmbeddingService,
+    load_embedding_service: Callable[[], EmbeddingService],
     split_config: SplitConfig,
     extensions: list[str] | None = None,
     index_name: str = DEFAULT_INDEX_NAME,
@@ -48,18 +49,33 @@ def refresh_library(
     """Synchronize a library while holding an exclusive refresh lock."""
     root = library_root.expanduser().resolve()
     state_dir = root / ".researchlite"
+    normalized_extensions = extensions or list(SUPPORTED_EXTENSIONS)
     preflight_manifest = IngestionManifest.open(root)
     preflight_manifest.close()
     with acquire_refresh_lock(state_dir):
         RefreshBackup.recover_interrupted_refresh(state_dir)
+        manifest = IngestionManifest.open(root)
+        try:
+            plan = plan_library_refresh(
+                root,
+                manifest,
+                current_config_fingerprint=current_config_fingerprint,
+                extensions=normalized_extensions,
+            )
+        finally:
+            manifest.close()
+        if not plan.new and not plan.changed and not plan.deleted:
+            return RefreshResult(plan=plan)
+
         backup = RefreshBackup.create(state_dir)
         try:
-            result = _refresh_library(
+            result = _apply_refresh_plan(
                 root,
+                plan,
                 current_config_fingerprint=current_config_fingerprint,
-                embedding_service=embedding_service,
+                embedding_service=load_embedding_service(),
                 split_config=split_config,
-                extensions=extensions,
+                extensions=normalized_extensions,
                 index_name=index_name,
             )
         except BaseException:
@@ -69,14 +85,15 @@ def refresh_library(
         return result
 
 
-def _refresh_library(
-    library_root: Path,
+def _apply_refresh_plan(
+    root: Path,
+    plan: RefreshPlan,
     *,
     current_config_fingerprint: str,
     embedding_service: EmbeddingService,
     split_config: SplitConfig,
-    extensions: list[str] | None = None,
-    index_name: str = DEFAULT_INDEX_NAME,
+    extensions: list[str],
+    index_name: str,
 ) -> RefreshResult:
     """Synchronize a library's persisted FAISS index and source manifest.
 
@@ -84,21 +101,10 @@ def _refresh_library(
     The local index is trusted because it is loaded only from the library's own
     ``.researchlite`` directory.
     """
-    root = library_root.expanduser().resolve()
-    normalized_extensions = extensions or list(SUPPORTED_EXTENSIONS)
     manifest = IngestionManifest.open(root)
     try:
-        plan = plan_library_refresh(
-            root,
-            manifest,
-            current_config_fingerprint=current_config_fingerprint,
-            extensions=normalized_extensions,
-        )
         result = RefreshResult(plan=plan)
         pending_sources = [*plan.new, *plan.changed]
-        if not pending_sources and not plan.deleted:
-            return result
-
         existing_records = manifest.list_sources()
         index_path = manifest.state_dir / f"{index_name}.faiss"
         vector_store: FaissVectorStore | None = None
@@ -120,9 +126,7 @@ def _refresh_library(
         for source_file in pending_sources:
             report = IngestReport()
             try:
-                documents = load_documents(
-                    str(source_file), extensions=normalized_extensions, report=report
-                )
+                documents = load_documents(str(source_file), extensions=extensions, report=report)
                 if report.failures:
                     raise RuntimeError(report.failures[0].reason)
                 chunks = split_documents(documents, config=split_config)
