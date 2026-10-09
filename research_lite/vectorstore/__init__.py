@@ -25,10 +25,19 @@ class LibraryIndex:
         if not len(ids) == len(documents) == len(vectors):
             msg = f"Got {len(vectors)} vectors and {len(ids)} ids for {len(documents)} chunks."
             raise ValueError(msg)
+        first_by_chunk_id: dict[str, int] = {}
+        for position, document in enumerate(documents):
+            key = str(document.metadata.get("chunk_id", position))
+            kept = first_by_chunk_id.get(key)
+            if kept is None or _source_path(document) < _source_path(documents[kept]):
+                first_by_chunk_id[key] = position
+        rows = sorted(first_by_chunk_id.values())
+        vectors = vectors[rows] if len(rows) < len(documents) else vectors
         norms = np.linalg.norm(vectors, axis=1, keepdims=True) if len(vectors) else 1.0
         self._library_root = library_root
-        self._documents = documents
-        self._documents_by_id = dict(zip(ids, documents, strict=True))
+        self._documents = [documents[row] for row in rows]
+        self._documents_by_id = {ids[row]: documents[row] for row in rows}
+        self._hidden_duplicates = len(documents) - len(rows)
         self._vectors = vectors / np.maximum(norms, 1e-12)
 
     @classmethod
@@ -54,10 +63,14 @@ class LibraryIndex:
     def keyword_search(self, query: str, *, k: int = 4) -> list[Document]:
         manifest = IngestionManifest.open(self._library_root)
         try:
-            ids = manifest.keyword_search(query, k=k)
+            ids = manifest.keyword_search(query, k=k + self._hidden_duplicates)
         finally:
             manifest.close()
-        return [self._documents_by_id[i] for i in ids if i in self._documents_by_id]
+        return [self._documents_by_id[i] for i in ids if i in self._documents_by_id][:k]
+
+
+def _source_path(document: Document) -> str:
+    return str(document.metadata.get("source_path", ""))
 
 
 __all__ = ["LibraryIndex"]
