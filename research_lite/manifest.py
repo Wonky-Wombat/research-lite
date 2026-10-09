@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,8 +25,9 @@ if TYPE_CHECKING:
     from research_lite.embedding import EmbeddedDocument
     from research_lite.preprocessing import SplitConfig
 
-SCHEMA_VERSION = "3"
-LEGACY_SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "4"
+FAISS_SCHEMA_VERSION = "2"
+UPGRADABLE_SCHEMA_VERSIONS = (FAISS_SCHEMA_VERSION, "3")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_state (
@@ -67,6 +69,18 @@ CREATE TABLE IF NOT EXISTS vectors (
     id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
     vector BLOB NOT NULL
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    text, content='chunks', content_rowid='id', tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
 """
 
 
@@ -134,8 +148,8 @@ class IngestionManifest:
         state_dir.mkdir(parents=True, exist_ok=True)
         connection = _connect(state_dir / "manifest.sqlite")
         existing_schema_version = _stored_schema_version(connection)
-        if existing_schema_version == LEGACY_SCHEMA_VERSION:
-            _upgrade_legacy_schema(state_dir, connection)
+        if existing_schema_version in UPGRADABLE_SCHEMA_VERSIONS:
+            _upgrade_schema(state_dir, connection, existing_schema_version)
             existing_schema_version = SCHEMA_VERSION
         if existing_schema_version is not None and existing_schema_version != SCHEMA_VERSION:
             connection.close()
@@ -183,8 +197,8 @@ class IngestionManifest:
             if schema_version is None:
                 msg = f"Manifest at {database_path} has no schema version."
                 raise RuntimeError(msg)
-            if schema_version == LEGACY_SCHEMA_VERSION:
-                _upgrade_legacy_schema(state_dir, connection)
+            if schema_version in UPGRADABLE_SCHEMA_VERSIONS:
+                _upgrade_schema(state_dir, connection, schema_version)
             elif schema_version != SCHEMA_VERSION:
                 msg = (
                     f"Unsupported manifest schema version at {database_path}. "
@@ -326,15 +340,27 @@ class IngestionManifest:
         """Return the number of stored chunks."""
         return int(self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
 
-    def load_chunks(self) -> tuple[list[Document], np.ndarray]:
+    def keyword_search(self, query: str, *, k: int) -> list[int]:
+        """Return ids of up to ``k`` chunks ranked by FTS5 BM25."""
+        terms = re.findall(r"\w+", query.lower())
+        if not terms or k < 1:
+            return []
+        rows = self._connection.execute(
+            "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?",
+            (" OR ".join(f'"{term}"' for term in dict.fromkeys(terms)), k),
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def load_chunks(self) -> tuple[list[int], list[Document], np.ndarray]:
         """Return stored chunks and their vectors as one float32 matrix."""
         import numpy as np
         from langchain_core.documents import Document
 
         cursor = self._connection.execute(
-            "SELECT source_path, title, source_unit, chunk_id, text FROM chunks ORDER BY id"
+            "SELECT id, source_path, title, source_unit, chunk_id, text FROM chunks ORDER BY id"
         )
         cursor.row_factory = None
+        rows = cursor.fetchall()
         documents = [
             Document(
                 page_content=text,
@@ -345,14 +371,15 @@ class IngestionManifest:
                     "chunk_id": chunk_id,
                 },
             )
-            for source_path, title, source_unit, chunk_id, text in cursor
+            for _, source_path, title, source_unit, chunk_id, text in rows
         ]
+        ids = [int(row[0]) for row in rows]
         if not documents:
-            return documents, np.zeros((0, 0), dtype=np.float32)
+            return ids, documents, np.zeros((0, 0), dtype=np.float32)
         cursor = self._connection.execute("SELECT vector FROM vectors ORDER BY id")
         cursor.row_factory = None
         vectors = np.frombuffer(b"".join(row[0] for row in cursor), dtype=np.float32)
-        return documents, vectors.reshape(len(documents), -1)
+        return ids, documents, vectors.reshape(len(documents), -1)
 
     def remove_source(self, path: str | Path) -> None:
         """Remove a source record after its indexed chunks have been removed."""
@@ -394,17 +421,22 @@ def _stored_schema_version(connection: sqlite3.Connection) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
-def _upgrade_legacy_schema(state_dir: Path, connection: sqlite3.Connection) -> None:
+def _upgrade_schema(state_dir: Path, connection: sqlite3.Connection, version: str) -> None:
     connection.executescript(SCHEMA)
-    for key, value in {"schema_version": SCHEMA_VERSION, "config_fingerprint": ""}.items():
+    connection.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
+    values = {"schema_version": SCHEMA_VERSION}
+    if version == FAISS_SCHEMA_VERSION:
+        values["config_fingerprint"] = ""
+    for key, value in values.items():
         connection.execute(
             "INSERT INTO library_state(key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
     connection.commit()
-    for filename in ("index.faiss", "index.pkl"):
-        (state_dir / filename).unlink(missing_ok=True)
+    if version == FAISS_SCHEMA_VERSION:
+        for filename in ("index.faiss", "index.pkl"):
+            (state_dir / filename).unlink(missing_ok=True)
 
 
 def _connect(database_path: Path) -> sqlite3.Connection:

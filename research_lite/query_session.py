@@ -22,7 +22,7 @@ from research_lite.retrieval import (
     RerankerUnavailableError,
     RetrievalMode,
 )
-from research_lite.vectorstore import VectorIndex
+from research_lite.vectorstore import LibraryIndex
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -42,10 +42,9 @@ class LibraryQuerySession:
 
     def __init__(
         self,
-        vector_index: VectorIndex,
+        index: LibraryIndex,
         embedding_service: EmbeddingService,
         *,
-        retrieval_documents: Sequence[Document],
         retrieval_mode: RetrievalMode,
         top_k: int,
         candidate_k: int,
@@ -57,8 +56,7 @@ class LibraryQuerySession:
         self._top_k = max(1, top_k)
         self._candidate_k = max(1, candidate_k)
         self._retriever = HybridRetriever(
-            vector_index,
-            retrieval_documents,
+            index,
             rrf_constant=rrf_constant,
             reranker=reranker,
         )

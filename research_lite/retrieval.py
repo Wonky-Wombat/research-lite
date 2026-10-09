@@ -9,9 +9,6 @@
 
 from __future__ import annotations
 
-import math
-import re
-from collections import Counter
 from collections.abc import Iterable, Sequence
 from typing import Literal, Protocol, cast
 
@@ -19,7 +16,7 @@ from langchain_core.documents import Document
 
 from research_lite.defaults import DEFAULT_RERANKER_MODEL
 from research_lite.model_loading import model_cache_dir, silence_model_downloads, use_cuda
-from research_lite.vectorstore import VectorIndex
+from research_lite.vectorstore import LibraryIndex
 
 RetrievalMode = Literal["dense", "hybrid", "hybrid-rerank"]
 
@@ -36,11 +33,6 @@ class RerankerUnavailableError(RuntimeError):
     """Raised when the optional cross-encoder cannot be loaded locally."""
 
 
-def _tokenize(text: str) -> list[str]:
-    """Return deterministic word tokens for lexical retrieval."""
-    return re.findall(r"\w+", text.lower())
-
-
 def _document_key(document: Document) -> str:
     """Return the stable chunk identity used when fusing rankings."""
     metadata = document.metadata
@@ -50,74 +42,6 @@ def _document_key(document: Document) -> str:
     return "\x1f".join(
         str(metadata.get(field, "")) for field in ("source_path", "source_unit", "chunk_index")
     ) or str(id(document))
-
-
-class BM25Retriever:
-    """Dependency-free BM25 retrieval over an in-memory chunk collection."""
-
-    def __init__(self, documents: Sequence[Document], *, k1: float = 1.5, b: float = 0.75) -> None:
-        if not documents:
-            msg = "Cannot build a BM25 index from an empty document collection."
-            raise ValueError(msg)
-        if k1 <= 0:
-            msg = "BM25 k1 must be positive."
-            raise ValueError(msg)
-        if not 0 <= b <= 1:
-            msg = "BM25 b must be between zero and one."
-            raise ValueError(msg)
-
-        self._documents = list(documents)
-        self._k1 = k1
-        self._b = b
-        self._term_frequencies = [
-            Counter(_tokenize(document.page_content)) for document in self._documents
-        ]
-        self._document_lengths = [sum(terms.values()) for terms in self._term_frequencies]
-        self._average_document_length = max(
-            sum(self._document_lengths) / len(self._document_lengths), 1.0
-        )
-        self._document_frequencies: Counter[str] = Counter(
-            term for terms in self._term_frequencies for term in terms
-        )
-
-    def search(self, query: str, *, k: int = 4) -> list[Document]:
-        """Return up to ``k`` chunks ranked by BM25 score."""
-        if k < 1:
-            return []
-        query_terms = set(_tokenize(query))
-        if not query_terms:
-            return []
-
-        document_count = len(self._documents)
-        scores: list[tuple[int, float]] = []
-        for index, (terms, document_length) in enumerate(
-            zip(self._term_frequencies, self._document_lengths, strict=True)
-        ):
-            normalization = self._k1 * (
-                1 - self._b + self._b * document_length / self._average_document_length
-            )
-            score = 0.0
-            for term in query_terms:
-                frequency = terms.get(term, 0)
-                if not frequency:
-                    continue
-                document_frequency = self._document_frequencies[term]
-                inverse_document_frequency = math.log(
-                    1 + (document_count - document_frequency + 0.5) / (document_frequency + 0.5)
-                )
-                score += (
-                    inverse_document_frequency
-                    * frequency
-                    * (self._k1 + 1)
-                    / (frequency + normalization)
-                )
-            if score > 0:
-                scores.append((index, score))
-
-        return [
-            self._documents[index]
-            for index, _ in sorted(scores, key=lambda item: (-item[1], item[0]))[:k]
-        ]
 
 
 def reciprocal_rank_fusion(
@@ -200,12 +124,11 @@ class CrossEncoderReranker:
 
 
 class HybridRetriever:
-    """Retrieve dense and BM25 candidates, then optionally rerank the fusion."""
+    """Retrieve dense and keyword candidates, then optionally rerank the fusion."""
 
     def __init__(
         self,
-        vector_index: VectorIndex,
-        documents: Sequence[Document],
+        index: LibraryIndex,
         *,
         rrf_constant: int = 60,
         reranker: CrossEncoderReranker | None = None,
@@ -213,8 +136,7 @@ class HybridRetriever:
         if rrf_constant < 1:
             msg = "RRF constant must be positive."
             raise ValueError(msg)
-        self._vector_index = vector_index
-        self._bm25 = BM25Retriever(documents)
+        self._index = index
         self._rrf_constant = rrf_constant
         self._reranker = reranker
 
@@ -235,11 +157,11 @@ class HybridRetriever:
             raise ValueError(msg)
 
         fetch_k = max(k, candidate_k)
-        dense_results = self._vector_index.similarity_search(query_vector, k=fetch_k)
+        dense_results = self._index.similarity_search(query_vector, k=fetch_k)
         if mode == "dense":
             return dense_results[:k]
 
-        lexical_results = self._bm25.search(query, k=fetch_k)
+        lexical_results = self._index.keyword_search(query, k=fetch_k)
         fused_results = reciprocal_rank_fusion(
             (dense_results, lexical_results), k=fetch_k, constant=self._rrf_constant
         )

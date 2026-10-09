@@ -41,16 +41,16 @@ if TYPE_CHECKING:
     from research_lite.library_refresh import RefreshResult
     from research_lite.preprocessing import SplitConfig
     from research_lite.retrieval import RetrievalMode
-    from research_lite.vectorstore import VectorIndex
+    from research_lite.vectorstore import LibraryIndex
 
 
 def load_persisted_library(
     library_root: Path,
     *,
     current_config_fingerprint: str,
-) -> VectorIndex:
+) -> LibraryIndex:
     """Load a synchronized library's chunks without re-embedding them."""
-    from research_lite.vectorstore import VectorIndex
+    from research_lite.vectorstore import LibraryIndex
 
     manifest = IngestionManifest.open(library_root)
     try:
@@ -72,7 +72,7 @@ def load_persisted_library(
             "Run `researchlite library sync` before querying this library."
         )
         raise FileNotFoundError(msg)
-    return VectorIndex.load(library_root)
+    return LibraryIndex.load(library_root)
 
 
 def _initialize_library_if_needed(library_root: Path, *, current_config_fingerprint: str) -> bool:
@@ -468,7 +468,7 @@ def main() -> None:
         local_files_only=args.local_files_only,
     )
     try:
-        vector_index = load_persisted_library(
+        index = load_persisted_library(
             library_root,
             current_config_fingerprint=current_config_fingerprint,
         )
@@ -496,11 +496,9 @@ def main() -> None:
             print("Reranker unavailable; chat will use hybrid retrieval.")
             retrieval_mode = "hybrid"
             reranker = None
-    retrieval_documents = vector_index.documents()
     session = LibraryQuerySession(
-        vector_index,
+        index,
         service,
-        retrieval_documents=retrieval_documents,
         retrieval_mode=retrieval_mode,
         top_k=args.top_k,
         candidate_k=args.retrieval_candidates,
@@ -525,7 +523,7 @@ def main() -> None:
                 parser.error(str(exc))
         from research_lite.repl import TerminalChat
 
-        library_stats = inspect_library(library_root, vector_index)
+        library_stats = inspect_library(library_root, index)
         TerminalChat(
             session,
             generate_answer=generator.generate_answer if generator else None,
