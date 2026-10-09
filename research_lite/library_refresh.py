@@ -21,9 +21,6 @@ from research_lite.manifest import IngestionManifest
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.refresh_plan import RefreshPlan, plan_library_refresh
 from research_lite.utils.loader_utils import build_source_metadata
-from research_lite.vectorstore import FaissVectorStore
-
-DEFAULT_INDEX_NAME = "index"
 
 
 @dataclass
@@ -44,7 +41,6 @@ def refresh_library(
     load_embedding_service: Callable[[], EmbeddingService],
     split_config: SplitConfig,
     extensions: list[str] | None = None,
-    index_name: str = DEFAULT_INDEX_NAME,
 ) -> RefreshResult:
     """Synchronize a library while holding an exclusive refresh lock."""
     root = library_root.expanduser().resolve()
@@ -62,17 +58,10 @@ def refresh_library(
                 current_config_fingerprint=current_config_fingerprint,
                 extensions=normalized_extensions,
             )
-            has_indexed_content = any(
-                record.has_indexed_content for record in manifest.list_sources()
-            )
         finally:
             manifest.close()
         if not plan.new and not plan.changed and not plan.deleted:
             return RefreshResult(plan=plan)
-        index_path = state_dir / f"{index_name}.faiss"
-        if has_indexed_content and not index_path.is_file():
-            msg = f"Missing FAISS index at {index_path}; cannot safely refresh this library."
-            raise FileNotFoundError(msg)
 
         backup = RefreshBackup.create(state_dir)
         try:
@@ -83,7 +72,6 @@ def refresh_library(
                 embedding_service=load_embedding_service(),
                 split_config=split_config,
                 extensions=normalized_extensions,
-                index_name=index_name,
             )
         except BaseException:
             backup.restore()
@@ -100,29 +88,16 @@ def _apply_refresh_plan(
     embedding_service: EmbeddingService,
     split_config: SplitConfig,
     extensions: list[str],
-    index_name: str,
 ) -> RefreshResult:
-    """Synchronize a library's persisted FAISS index and source manifest.
+    """Synchronize a library's stored chunks and source manifest.
 
     Changed chunks remain available if loading or embedding their replacement fails.
-    The local index is trusted because it is loaded only from the library's own
-    ``.researchlite`` directory.
     """
     manifest = IngestionManifest.open(root)
     try:
         result = RefreshResult(plan=plan)
         pending_sources = [*plan.new, *plan.changed]
         rebuild = plan.configuration_changed
-        index_files = [manifest.state_dir / f"{index_name}.{suffix}" for suffix in ("faiss", "pkl")]
-        vector_store: FaissVectorStore | None = None
-        if not rebuild and index_files[0].is_file():
-            vector_store = FaissVectorStore.load(
-                manifest.state_dir,
-                embedding_backend=embedding_service.backend,
-                index_name=index_name,
-                allow_dangerous_deserialization=True,
-            )
-
         replacements: list[EmbeddedDocument] = []
         successful_changed: list[Path] = []
         successful_sources: list[tuple[Path, str]] = []
@@ -143,23 +118,12 @@ def _apply_refresh_plan(
                 result.failed_sources.append(source_file)
                 failed_source_messages.append((source_file, str(exc)))
 
-        removal_paths = [] if rebuild else [*plan.deleted, *successful_changed]
-        if vector_store is not None and removal_paths:
-            result.deleted_chunks = vector_store.delete_by_source_paths(removal_paths)
-        if replacements:
-            if vector_store is None:
-                vector_store = FaissVectorStore.from_documents(
-                    replacements, embedding_backend=embedding_service.backend
-                )
-                result.added_chunks = len(replacements)
-            else:
-                vector_store.add(replacements)
-                result.added_chunks = len(replacements)
-        if vector_store is not None and (removal_paths or replacements):
-            vector_store.save(manifest.state_dir, index_name=index_name)
-        elif rebuild:
-            for index_file in index_files:
-                index_file.unlink(missing_ok=True)
+        if rebuild:
+            manifest.clear_chunks()
+        else:
+            result.deleted_chunks = manifest.delete_chunks([*plan.deleted, *successful_changed])
+        manifest.add_chunks(replacements)
+        result.added_chunks = len(replacements)
 
         for source_file in plan.deleted:
             manifest.remove_source(source_file)
@@ -196,4 +160,4 @@ def _apply_refresh_plan(
         manifest.close()
 
 
-__all__ = ["DEFAULT_INDEX_NAME", "RefreshResult", "refresh_library"]
+__all__ = ["RefreshResult", "refresh_library"]

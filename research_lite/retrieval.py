@@ -19,7 +19,7 @@ from langchain_core.documents import Document
 
 from research_lite.defaults import DEFAULT_RERANKER_MODEL
 from research_lite.model_loading import model_cache_dir, silence_model_downloads, use_cuda
-from research_lite.vectorstore import FaissVectorStore
+from research_lite.vectorstore import VectorIndex
 
 RetrievalMode = Literal["dense", "hybrid", "hybrid-rerank"]
 
@@ -200,11 +200,11 @@ class CrossEncoderReranker:
 
 
 class HybridRetriever:
-    """Retrieve FAISS and BM25 candidates, then optionally rerank the fusion."""
+    """Retrieve dense and BM25 candidates, then optionally rerank the fusion."""
 
     def __init__(
         self,
-        vector_store: FaissVectorStore,
+        vector_index: VectorIndex,
         documents: Sequence[Document],
         *,
         rrf_constant: int = 60,
@@ -213,7 +213,7 @@ class HybridRetriever:
         if rrf_constant < 1:
             msg = "RRF constant must be positive."
             raise ValueError(msg)
-        self._vector_store = vector_store
+        self._vector_index = vector_index
         self._bm25 = BM25Retriever(documents)
         self._rrf_constant = rrf_constant
         self._reranker = reranker
@@ -235,7 +235,7 @@ class HybridRetriever:
             raise ValueError(msg)
 
         fetch_k = max(k, candidate_k)
-        dense_results = self._vector_store.similarity_search(query_vector, k=fetch_k)
+        dense_results = self._vector_index.similarity_search(query_vector, k=fetch_k)
         if mode == "dense":
             return dense_results[:k]
 

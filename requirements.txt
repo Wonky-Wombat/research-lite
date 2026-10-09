@@ -1,6 +1,6 @@
-faiss-cpu
 filelock
-langchain-community
+langchain-core
+numpy
 python-dotenv
 prompt_toolkit
 pypdf

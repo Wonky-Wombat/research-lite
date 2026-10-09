@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from research_lite.manifest import IngestionManifest
-from research_lite.vectorstore import FaissVectorStore
+from research_lite.vectorstore import VectorIndex
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class LibraryStats:
         return f"Library: {self.indexed_sources} papers · {self.chunks} chunks{failure_suffix}."
 
 
-def inspect_library(library_root: Path, vector_store: FaissVectorStore) -> LibraryStats:
+def inspect_library(library_root: Path, vector_index: VectorIndex) -> LibraryStats:
     """Read manifest counts and the loaded index's chunk count without writing state."""
     manifest = IngestionManifest.open(library_root)
     try:
@@ -40,5 +40,5 @@ def inspect_library(library_root: Path, vector_store: FaissVectorStore) -> Libra
     return LibraryStats(
         indexed_sources=sum(record.has_indexed_content for record in records),
         failed_sources=sum(record.last_refresh_error is not None for record in records),
-        chunks=len(vector_store.documents()),
+        chunks=len(vector_index.documents()),
     )

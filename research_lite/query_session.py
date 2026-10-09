@@ -22,7 +22,7 @@ from research_lite.retrieval import (
     RerankerUnavailableError,
     RetrievalMode,
 )
-from research_lite.vectorstore import FaissVectorStore
+from research_lite.vectorstore import VectorIndex
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -38,11 +38,11 @@ class QueryOutcome:
 
 
 class LibraryQuerySession:
-    """Search a loaded library without modifying its manifest or FAISS index."""
+    """Search a loaded library without modifying its manifest."""
 
     def __init__(
         self,
-        vector_store: FaissVectorStore,
+        vector_index: VectorIndex,
         embedding_service: EmbeddingService,
         *,
         retrieval_documents: Sequence[Document],
@@ -57,7 +57,7 @@ class LibraryQuerySession:
         self._top_k = max(1, top_k)
         self._candidate_k = max(1, candidate_k)
         self._retriever = HybridRetriever(
-            vector_store,
+            vector_index,
             retrieval_documents,
             rrf_constant=rrf_constant,
             reranker=reranker,

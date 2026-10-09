@@ -42,14 +42,12 @@ class RefreshBackup:
 
     @classmethod
     def create(cls, state_dir: Path) -> RefreshBackup:
-        """Snapshot the current manifest and FAISS artifacts before a refresh starts."""
+        """Snapshot the current manifest before a refresh starts."""
         backup = cls(state_dir=state_dir, backup_dir=state_dir / BACKUP_DIRNAME)
         backup.discard()
         backup.backup_dir.mkdir()
         try:
             backup._backup_database()
-            for artifact in _index_artifacts(state_dir):
-                shutil.copy2(artifact, backup.backup_dir / artifact.name)
             (backup.backup_dir / READY_MARKER).touch()
         except Exception:
             backup.discard()
@@ -65,15 +63,11 @@ class RefreshBackup:
             pass
 
     def restore(self) -> None:
-        """Replace manifest and index artifacts with the pre-refresh snapshot."""
-        for artifact in _index_artifacts(self.state_dir):
-            artifact.unlink()
+        """Replace the manifest with the pre-refresh snapshot."""
         for filename in ("manifest.sqlite", "manifest.sqlite-wal", "manifest.sqlite-shm"):
             (self.state_dir / filename).unlink(missing_ok=True)
 
         shutil.copy2(self.backup_dir / BACKUP_DATABASE_NAME, self.state_dir / "manifest.sqlite")
-        for artifact in _index_artifacts(self.backup_dir):
-            shutil.copy2(artifact, self.state_dir / artifact.name)
         self.discard()
 
     def discard(self) -> None:
@@ -89,18 +83,6 @@ class RefreshBackup:
         finally:
             destination.close()
             source.close()
-
-
-def _index_artifacts(directory: Path) -> list[Path]:
-    """Return persisted FAISS artifacts stored directly in a library state directory."""
-    return sorted(
-        (
-            path
-            for path in directory.iterdir()
-            if path.is_file() and path.suffix in {".faiss", ".pkl"}
-        ),
-        key=lambda path: path.name,
-    )
 
 
 __all__ = ["BACKUP_DIRNAME", "RefreshBackup"]

@@ -18,9 +18,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import numpy as np
+    from langchain_core.documents import Document
+
+    from research_lite.embedding import EmbeddedDocument
     from research_lite.preprocessing import SplitConfig
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
+LEGACY_SCHEMA_VERSION = "2"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_state (
@@ -45,6 +50,22 @@ CREATE TABLE IF NOT EXISTS sources (
          AND indexed_config_fingerprint IS NOT NULL
          AND indexed_at IS NOT NULL)
     )
+);
+
+CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source_unit TEXT NOT NULL,
+    chunk_id TEXT NOT NULL,
+    text TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS chunks_source_path ON chunks(source_path);
+
+CREATE TABLE IF NOT EXISTS vectors (
+    id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+    vector BLOB NOT NULL
 );
 """
 
@@ -108,11 +129,14 @@ class IngestionManifest:
     def initialize(
         cls, library_root: Path, *, current_config_fingerprint: str
     ) -> IngestionManifest:
-        """Create or open a manifest without loading sources or FAISS."""
+        """Create or open a manifest without loading sources or chunks."""
         state_dir = library_root.expanduser().resolve() / ".researchlite"
         state_dir.mkdir(parents=True, exist_ok=True)
         connection = _connect(state_dir / "manifest.sqlite")
         existing_schema_version = _stored_schema_version(connection)
+        if existing_schema_version == LEGACY_SCHEMA_VERSION:
+            _upgrade_legacy_schema(state_dir, connection)
+            existing_schema_version = SCHEMA_VERSION
         if existing_schema_version is not None and existing_schema_version != SCHEMA_VERSION:
             connection.close()
             msg = (
@@ -155,13 +179,13 @@ class IngestionManifest:
 
         connection = _connect(database_path)
         try:
-            schema_version = connection.execute(
-                "SELECT value FROM library_state WHERE key = 'schema_version'"
-            ).fetchone()
+            schema_version = _stored_schema_version(connection)
             if schema_version is None:
                 msg = f"Manifest at {database_path} has no schema version."
                 raise RuntimeError(msg)
-            if str(schema_version["value"]) != SCHEMA_VERSION:
+            if schema_version == LEGACY_SCHEMA_VERSION:
+                _upgrade_legacy_schema(state_dir, connection)
+            elif schema_version != SCHEMA_VERSION:
                 msg = (
                     f"Unsupported manifest schema version at {database_path}. "
                     "Delete .researchlite and run `researchlite library sync` again."
@@ -258,6 +282,78 @@ class IngestionManifest:
         )
         self._connection.commit()
 
+    def add_chunks(self, embedded_documents: list[EmbeddedDocument]) -> None:
+        """Store chunk text, citation fields, and float32 vectors."""
+        import numpy as np
+
+        for embedded in embedded_documents:
+            metadata = embedded.document.metadata
+            cursor = self._connection.execute(
+                "INSERT INTO chunks(source_path, title, source_unit, chunk_id, text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    _canonical_path(metadata["source_path"]),
+                    str(metadata.get("title", "")),
+                    str(metadata.get("source_unit", "")),
+                    str(metadata["chunk_id"]),
+                    embedded.document.page_content,
+                ),
+            )
+            self._connection.execute(
+                "INSERT INTO vectors(id, vector) VALUES (?, ?)",
+                (cursor.lastrowid, np.asarray(embedded.vector, dtype=np.float32).tobytes()),
+            )
+        self._connection.commit()
+
+    def delete_chunks(self, paths: list[Path]) -> int:
+        """Delete every chunk that belongs to the given source paths."""
+        deleted = 0
+        for path in paths:
+            cursor = self._connection.execute(
+                "DELETE FROM chunks WHERE source_path = ?", (_canonical_path(path),)
+            )
+            deleted += cursor.rowcount
+        self._connection.commit()
+        return deleted
+
+    def clear_chunks(self) -> None:
+        """Delete every stored chunk before a full rebuild."""
+        self._connection.execute("DELETE FROM vectors")
+        self._connection.execute("DELETE FROM chunks")
+        self._connection.commit()
+
+    def chunk_count(self) -> int:
+        """Return the number of stored chunks."""
+        return int(self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+
+    def load_chunks(self) -> tuple[list[Document], np.ndarray]:
+        """Return stored chunks and their vectors as one float32 matrix."""
+        import numpy as np
+        from langchain_core.documents import Document
+
+        cursor = self._connection.execute(
+            "SELECT source_path, title, source_unit, chunk_id, text FROM chunks ORDER BY id"
+        )
+        cursor.row_factory = None
+        documents = [
+            Document(
+                page_content=text,
+                metadata={
+                    "source_path": source_path,
+                    "title": title,
+                    "source_unit": source_unit,
+                    "chunk_id": chunk_id,
+                },
+            )
+            for source_path, title, source_unit, chunk_id, text in cursor
+        ]
+        if not documents:
+            return documents, np.zeros((0, 0), dtype=np.float32)
+        cursor = self._connection.execute("SELECT vector FROM vectors ORDER BY id")
+        cursor.row_factory = None
+        vectors = np.frombuffer(b"".join(row[0] for row in cursor), dtype=np.float32)
+        return documents, vectors.reshape(len(documents), -1)
+
     def remove_source(self, path: str | Path) -> None:
         """Remove a source record after its indexed chunks have been removed."""
         self._connection.execute(
@@ -296,6 +392,19 @@ def _stored_schema_version(connection: sqlite3.Connection) -> str | None:
         "SELECT value FROM library_state WHERE key = 'schema_version'"
     ).fetchone()
     return str(row["value"]) if row is not None else None
+
+
+def _upgrade_legacy_schema(state_dir: Path, connection: sqlite3.Connection) -> None:
+    connection.executescript(SCHEMA)
+    for key, value in {"schema_version": SCHEMA_VERSION, "config_fingerprint": ""}.items():
+        connection.execute(
+            "INSERT INTO library_state(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+    connection.commit()
+    for filename in ("index.faiss", "index.pkl"):
+        (state_dir / filename).unlink(missing_ok=True)
 
 
 def _connect(database_path: Path) -> sqlite3.Connection:

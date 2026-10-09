@@ -41,23 +41,21 @@ if TYPE_CHECKING:
     from research_lite.library_refresh import RefreshResult
     from research_lite.preprocessing import SplitConfig
     from research_lite.retrieval import RetrievalMode
-    from research_lite.vectorstore import FaissVectorStore
+    from research_lite.vectorstore import VectorIndex
 
 
 def load_persisted_library(
     library_root: Path,
     *,
     current_config_fingerprint: str,
-    embedding_service: EmbeddingService,
-    index_name: str = "index",
-) -> FaissVectorStore:
-    """Load a library created by ``--refresh-library`` without re-embedding it."""
-    from research_lite.vectorstore import FaissVectorStore
+) -> VectorIndex:
+    """Load a synchronized library's chunks without re-embedding them."""
+    from research_lite.vectorstore import VectorIndex
 
     manifest = IngestionManifest.open(library_root)
     try:
         recorded_config_fingerprint = manifest.state_value("config_fingerprint")
-        state_dir = manifest.state_dir
+        chunk_count = manifest.chunk_count()
     finally:
         manifest.close()
 
@@ -68,22 +66,13 @@ def load_persisted_library(
         )
         raise RuntimeError(msg)
 
-    index_path = state_dir / f"{index_name}.faiss"
-    if not index_path.is_file():
+    if not chunk_count:
         msg = (
-            f"No persisted FAISS index found at '{index_path}'. "
+            f"No indexed chunks found in '{library_root}'. "
             "Run `researchlite library sync` before querying this library."
         )
         raise FileNotFoundError(msg)
-
-    # RefreshLibrary creates this state locally. FAISS persists its document store in a
-    # pickle file, so loading the managed local library necessarily opts into it here.
-    return FaissVectorStore.load(
-        state_dir,
-        embedding_backend=embedding_service.backend,
-        index_name=index_name,
-        allow_dangerous_deserialization=True,
-    )
+    return VectorIndex.load(library_root)
 
 
 def _initialize_library_if_needed(library_root: Path, *, current_config_fingerprint: str) -> bool:
@@ -260,7 +249,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=("dense", "hybrid", "hybrid-rerank"),
         default="hybrid-rerank",
         help=(
-            "Advanced override: FAISS only, FAISS+BM25 RRF fusion, or fusion followed "
+            "Advanced override: vectors only, vector+BM25 RRF fusion, or fusion followed "
             "by a cross-encoder (default: hybrid-rerank)."
         ),
     )
@@ -436,13 +425,10 @@ def main() -> None:
         )
         manifest = IngestionManifest.open(library_root)
         try:
-            indexed = any(source.has_indexed_content for source in manifest.list_sources())
+            indexed = manifest.chunk_count() > 0
         finally:
             manifest.close()
-        index_dir = library_root / ".researchlite"
-        if not indexed or not all(
-            (index_dir / f"index.{suffix}").is_file() for suffix in ("faiss", "pkl")
-        ):
+        if not indexed:
             parser.error(
                 f"No documents were indexed in '{library_root}'. Check the files and retry."
             )
@@ -482,10 +468,9 @@ def main() -> None:
         local_files_only=args.local_files_only,
     )
     try:
-        vector_store = load_persisted_library(
+        vector_index = load_persisted_library(
             library_root,
             current_config_fingerprint=current_config_fingerprint,
-            embedding_service=service,
         )
         if not args.json:
             print(f"Loaded ResearchLite library index from '{library_root}'.")
@@ -511,9 +496,9 @@ def main() -> None:
             print("Reranker unavailable; chat will use hybrid retrieval.")
             retrieval_mode = "hybrid"
             reranker = None
-    retrieval_documents = vector_store.documents()
+    retrieval_documents = vector_index.documents()
     session = LibraryQuerySession(
-        vector_store,
+        vector_index,
         service,
         retrieval_documents=retrieval_documents,
         retrieval_mode=retrieval_mode,
@@ -540,7 +525,7 @@ def main() -> None:
                 parser.error(str(exc))
         from research_lite.repl import TerminalChat
 
-        library_stats = inspect_library(library_root, vector_store)
+        library_stats = inspect_library(library_root, vector_index)
         TerminalChat(
             session,
             generate_answer=generator.generate_answer if generator else None,
