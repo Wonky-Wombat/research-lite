@@ -1,7 +1,6 @@
 faiss-cpu
 filelock
 langchain-community
-langchain-text-splitters
 python-dotenv
 prompt_toolkit
 pypdf

@@ -12,7 +12,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from ..utils.loader_utils import _sha1
 
@@ -58,25 +57,59 @@ def _select_separators(ext: str, config: SplitConfig) -> tuple[str, ...]:
     return config.separators_by_ext.get(normalized, config.separators)
 
 
+def _split_text(text: str, separators: tuple[str, ...], size: int, overlap: int) -> list[str]:
+    separator = separators[-1]
+    remaining: tuple[str, ...] = ()
+    for index, candidate in enumerate(separators):
+        if candidate == "" or candidate in text:
+            separator, remaining = candidate, separators[index + 1 :]
+            break
+    pieces = [piece for piece in (text.split(separator) if separator else list(text)) if piece]
+    chunks: list[str] = []
+    pending: list[str] = []
+    for piece in pieces:
+        if len(piece) < size:
+            pending.append(piece)
+            continue
+        chunks.extend(_merge_pieces(pending, separator, size, overlap))
+        pending = []
+        chunks.extend(_split_text(piece, remaining, size, overlap) if remaining else [piece])
+    chunks.extend(_merge_pieces(pending, separator, size, overlap))
+    return chunks
+
+
+def _merge_pieces(pieces: list[str], separator: str, size: int, overlap: int) -> list[str]:
+    chunks: list[str] = []
+    window: list[str] = []
+    total = 0
+    for piece in pieces:
+        if window and total + len(piece) + len(separator) > size:
+            chunks.append(separator.join(window).strip())
+            while total > overlap or (total > 0 and total + len(piece) + len(separator) > size):
+                total -= len(window.pop(0)) + (len(separator) if window else 0)
+        total += len(piece) + (len(separator) if window else 0)
+        window.append(piece)
+    if window:
+        chunks.append(separator.join(window).strip())
+    return [chunk for chunk in chunks if chunk]
+
+
 def split_documents(
     documents: Iterable[Document], config: SplitConfig | None = None
 ) -> list[Document]:
     """Split documents into smaller chunks suitable for embedding."""
     cfg = config or SplitConfig()
+    if cfg.keep_separator:
+        raise ValueError("keep_separator=True is not supported.")
     chunked_docs: list[Document] = []
     for document in documents:
         ext = str(document.metadata.get("ext", "") or "").lower()
         separators = _select_separators(ext, cfg)
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=cfg.chunk_size,
-            chunk_overlap=cfg.chunk_overlap,
-            separators=list(separators),
-            keep_separator=cfg.keep_separator,
-        )
         cleaned_content = _normalize_text(document.page_content)
-        base_doc = Document(page_content=cleaned_content, metadata=dict(document.metadata))
-
-        splits = splitter.split_documents([base_doc])
+        splits = [
+            Document(page_content=text, metadata=dict(document.metadata))
+            for text in _split_text(cleaned_content, separators, cfg.chunk_size, cfg.chunk_overlap)
+        ]
         if not splits:
             continue
         total_chunks = len(splits)
