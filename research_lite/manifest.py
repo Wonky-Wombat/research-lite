@@ -336,6 +336,13 @@ class IngestionManifest:
         self._connection.execute("DELETE FROM chunks")
         self._connection.commit()
 
+    def set_chunk_title(self, path: Path, title: str) -> None:
+        """Change the display title stored with a source's chunks."""
+        self._connection.execute(
+            "UPDATE chunks SET title = ? WHERE source_path = ?", (title, _canonical_path(path))
+        )
+        self._connection.commit()
+
     def chunk_count(self) -> int:
         """Return the number of stored chunks."""
         return int(self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])

@@ -14,13 +14,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from research_lite.embedding import EmbeddedDocument, EmbeddingService
-from research_lite.ingestion import SUPPORTED_EXTENSIONS, IngestReport, load_documents
+from research_lite.ingestion import (
+    SUPPORTED_EXTENSIONS,
+    IngestReport,
+    load_documents,
+    read_title,
+)
 from research_lite.library_backup import RefreshBackup
 from research_lite.library_lock import acquire_refresh_lock
 from research_lite.manifest import IngestionManifest
 from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.refresh_plan import RefreshPlan, plan_library_refresh
 from research_lite.utils.loader_utils import build_source_metadata
+
+TITLE_RULES = "1"
 
 
 @dataclass
@@ -60,24 +67,40 @@ def refresh_library(
             )
         finally:
             manifest.close()
-        if not plan.new and not plan.changed and not plan.deleted:
-            return RefreshResult(plan=plan)
-
-        backup = RefreshBackup.create(state_dir)
-        try:
-            result = _apply_refresh_plan(
-                root,
-                plan,
-                current_config_fingerprint=current_config_fingerprint,
-                embedding_service=load_embedding_service(),
-                split_config=split_config,
-                extensions=normalized_extensions,
-            )
-        except BaseException:
-            backup.restore()
-            raise
-        backup.complete()
+        result = RefreshResult(plan=plan)
+        if plan.new or plan.changed or plan.deleted:
+            backup = RefreshBackup.create(state_dir)
+            try:
+                result = _apply_refresh_plan(
+                    root,
+                    plan,
+                    current_config_fingerprint=current_config_fingerprint,
+                    embedding_service=load_embedding_service(),
+                    split_config=split_config,
+                    extensions=normalized_extensions,
+                )
+            except BaseException:
+                backup.restore()
+                raise
+            backup.complete()
+        _refresh_titles(root, plan.unchanged)
         return result
+
+
+def _refresh_titles(root: Path, sources: list[Path]) -> None:
+    """Re-read titles of already indexed sources once after the title rules change."""
+    manifest = IngestionManifest.open(root)
+    try:
+        if manifest.state_value("title_rules") == TITLE_RULES:
+            return
+        for source in sources:
+            try:
+                manifest.set_chunk_title(source, read_title(source))
+            except Exception:
+                continue
+        manifest.set_state_value("title_rules", TITLE_RULES)
+    finally:
+        manifest.close()
 
 
 def _apply_refresh_plan(

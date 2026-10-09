@@ -15,12 +15,12 @@ from research_lite import Document
 
 from ..utils.loader_utils import discover_files
 from .csv_loader import load_csv
-from .epub_loader import load_epub
+from .epub_loader import epub_title, load_epub
 from .excel_loader import load_excel
 from .html_loader import load_html
 from .json_loader import load_json
 from .markdown_loader import load_markdown
-from .pdf_loader import load_pdf
+from .pdf_loader import load_pdf, pdf_title
 from .pptx_loader import load_pptx
 from .text_loader import load_text
 from .word_loader import load_word
@@ -125,10 +125,23 @@ def load_documents(
     return documents
 
 
+def read_title(path: Path) -> str:
+    """Return the display title a source would get when it is indexed."""
+    ext = path.suffix.lower().lstrip(".")
+    if ext == "pdf":
+        from pypdf import PdfReader
+
+        return pdf_title(PdfReader(path), path.stem)
+    if ext == "epub":
+        return epub_title(path)
+    return path.stem
+
+
 __all__ = [
     "IngestFailure",
     "IngestReport",
     "SUPPORTED_EXTENSIONS",
     "load_documents",
     "load_documents_with_report",
+    "read_title",
 ]

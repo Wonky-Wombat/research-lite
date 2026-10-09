@@ -70,6 +70,32 @@ def build_source_metadata(source_file: Path) -> dict[str, Any]:
     }
 
 
+_PLACEHOLDER_TITLES = {
+    "document",
+    "no title",
+    "powerpoint presentation",
+    "presentation",
+    "slide 1",
+    "title",
+    "untitled",
+}
+_FILE_SUFFIXES = (".doc", ".docx", ".dvi", ".pdf", ".ppt", ".pptx", ".tex", ".txt")
+
+
+def usable_title(title: object, fallback: str) -> str:
+    """Return a cleaned metadata title, or ``fallback`` when it looks like a placeholder."""
+    text = " ".join(str(title or "").split())
+    lowered = text.lower()
+    if (
+        len(text) < 4
+        or lowered in _PLACEHOLDER_TITLES
+        or lowered.startswith("microsoft word - ")
+        or lowered.endswith(_FILE_SUFFIXES)
+    ):
+        return fallback
+    return text
+
+
 def populate_document_metadata(
     document: Document, source_metadata: dict[str, Any], *, source_unit_index: int
 ) -> Document:
