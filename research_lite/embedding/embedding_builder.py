@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-from langchain_core.embeddings import Embeddings
-
 from research_lite.defaults import DEFAULT_EMBEDDING_MODEL
 from research_lite.model_loading import model_cache_dir, silence_model_downloads, use_cuda
 
@@ -17,7 +15,7 @@ from . import EmbeddingConfig, EmbeddingService
 DEFAULT_MODEL_NAME = DEFAULT_EMBEDDING_MODEL
 
 
-class FastEmbedEmbeddings(Embeddings):
+class FastEmbedEmbeddings:
     def __init__(
         self, model_name: str, *, device: str = "cpu", local_files_only: bool = False
     ) -> None:

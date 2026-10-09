@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from langchain_core.documents import Document
+    from research_lite import Document
 
 
 @dataclass(frozen=True)

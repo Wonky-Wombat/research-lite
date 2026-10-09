@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
-from langchain_core.documents import Document
 
+from research_lite import Document
 from research_lite.manifest import IngestionManifest
 
 

@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from langchain_core.documents import Document
+from research_lite import Document
 
 from ..utils.loader_utils import discover_files
 from .csv_loader import load_csv

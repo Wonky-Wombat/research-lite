@@ -13,8 +13,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from langchain_core.documents import Document
-
+from research_lite import Document
 from research_lite.citations import citation_number_by_source, page_label
 from research_lite.defaults import (
     DEFAULT_OLLAMA_BASE_URL,

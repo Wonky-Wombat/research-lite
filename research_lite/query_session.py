@@ -12,8 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from langchain_core.documents import Document
-
+from research_lite import Document
 from research_lite.citations import citation_number_by_source, page_label, page_number
 from research_lite.embedding import EmbeddingService
 from research_lite.retrieval import (

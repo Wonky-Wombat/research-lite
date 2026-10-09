@@ -5,8 +5,9 @@
 # Created by Wonky-Wombat on 2026-09-22.
 #
 
-from langchain_core.documents import Document
 from pypdf import PdfReader
+
+from research_lite import Document
 
 from ..utils.loader_utils import build_source_metadata, iter_files, populate_document_metadata
 

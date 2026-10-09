@@ -6,7 +6,8 @@
 #
 
 import docx2txt
-from langchain_core.documents import Document
+
+from research_lite import Document
 
 from ..utils.loader_utils import build_source_metadata, iter_files, populate_document_metadata
 

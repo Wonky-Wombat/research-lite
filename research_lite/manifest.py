@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
-    from langchain_core.documents import Document
 
+    from research_lite import Document
     from research_lite.embedding import EmbeddedDocument
     from research_lite.preprocessing import SplitConfig
 
@@ -354,7 +354,8 @@ class IngestionManifest:
     def load_chunks(self) -> tuple[list[int], list[Document], np.ndarray]:
         """Return stored chunks and their vectors as one float32 matrix."""
         import numpy as np
-        from langchain_core.documents import Document
+
+        from research_lite import Document
 
         cursor = self._connection.execute(
             "SELECT id, source_path, title, source_unit, chunk_id, text FROM chunks ORDER BY id"

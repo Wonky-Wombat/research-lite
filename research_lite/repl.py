@@ -12,8 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 
-from langchain_core.documents import Document
-
+from research_lite import Document
 from research_lite.citations import citation_sources
 from research_lite.library_stats import LibraryStats
 from research_lite.query_session import LibraryQuerySession, QueryOutcome, format_evidence

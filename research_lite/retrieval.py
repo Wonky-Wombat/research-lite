@@ -12,8 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Literal, Protocol, cast
 
-from langchain_core.documents import Document
-
+from research_lite import Document
 from research_lite.defaults import DEFAULT_RERANKER_MODEL
 from research_lite.model_loading import model_cache_dir, silence_model_downloads, use_cuda
 from research_lite.vectorstore import LibraryIndex

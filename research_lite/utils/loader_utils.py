@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from langchain_core.documents import Document
+from research_lite import Document
 
 
 def _sha1(text: str) -> str:

@@ -11,7 +11,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from langchain_core.documents import Document
+from research_lite import Document
 
 from ..utils.loader_utils import _sha1
 

@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Protocol
 
-from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
+from research_lite import Document
+
+
+class Embeddings(Protocol):
+    def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_query(self, text: str) -> list[float]: ...
 
 
 @dataclass(slots=True)
@@ -30,7 +36,7 @@ class EmbeddingConfig:
 
 
 class EmbeddingService:
-    """Batch documents through a langchain Embeddings backend."""
+    """Batch documents through an embedding backend."""
 
     def __init__(
         self, embedding_backend: Embeddings, config: EmbeddingConfig | None = None
@@ -68,4 +74,4 @@ class EmbeddingService:
         return list(self._embedding_backend.embed_query(query))
 
 
-__all__ = ["EmbeddedDocument", "EmbeddingConfig", "EmbeddingService"]
+__all__ = ["EmbeddedDocument", "Embeddings", "EmbeddingConfig", "EmbeddingService"]

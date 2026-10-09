@@ -5,7 +5,7 @@
 # Created by Wonky-Wombat on 2026-09-22.
 #
 
-from langchain_core.documents import Document
+from research_lite import Document
 
 from ..utils.loader_utils import load_text_by_ext
 
