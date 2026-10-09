@@ -20,6 +20,7 @@ ZERO_WIDTH = ["\ufeff", "\u200b", "\u200c", "\u200d"]
 
 def _normalize_text(text: str) -> str:
     """Apply lightweight normalization to reduce noise before splitting."""
+    text = text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
     for zw in ZERO_WIDTH:
         text = text.replace(zw, "")
     text = re.sub(r"\n\s*\n+", "\n\n", text)
