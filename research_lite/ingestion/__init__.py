@@ -15,11 +15,13 @@ from research_lite import Document
 
 from ..utils.loader_utils import discover_files
 from .csv_loader import load_csv
+from .epub_loader import load_epub
 from .excel_loader import load_excel
 from .html_loader import load_html
 from .json_loader import load_json
 from .markdown_loader import load_markdown
 from .pdf_loader import load_pdf
+from .pptx_loader import load_pptx
 from .text_loader import load_text
 from .word_loader import load_word
 
@@ -34,6 +36,8 @@ _LOADER_BY_EXT: dict[str, Callable[[str], list[Document]]] = {
     "xls": load_excel,
     "docx": load_word,
     "json": load_json,
+    "pptx": load_pptx,
+    "epub": load_epub,
 }
 
 SUPPORTED_EXTENSIONS = tuple(_LOADER_BY_EXT)

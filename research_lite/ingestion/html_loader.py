@@ -12,18 +12,27 @@ from research_lite import Document
 from ..utils.loader_utils import build_source_metadata, iter_files, populate_document_metadata
 
 
-def load_html(path: str) -> list[Document]:
-    """Load HTML documents from a file or directory as Markdown text."""
-    from bs4 import BeautifulSoup
+def html_to_text(markup: str | bytes) -> str:
+    """Convert HTML markup to Markdown text."""
+    from bs4 import BeautifulSoup, CData, Declaration, ProcessingInstruction
     from markdownify import MarkdownConverter
 
+    soup = BeautifulSoup(markup, "html.parser")
+    for tag in soup(["head", "noscript", "template"]):
+        tag.decompose()
+    for node in soup.find_all(
+        string=lambda text: isinstance(text, CData | Declaration | ProcessingInstruction)
+    ):
+        node.extract()
     converter = MarkdownConverter(heading_style="ATX", strip=["a", "img"])
+    return re.sub(r"\n{3,}", "\n\n", converter.convert_soup(soup)).strip()
+
+
+def load_html(path: str) -> list[Document]:
+    """Load HTML documents from a file or directory as Markdown text."""
     documents: list[Document] = []
     for html_file in iter_files(path, extensions=["html", "htm"]):
-        soup = BeautifulSoup(html_file.read_text(encoding="utf-8", errors="replace"), "html.parser")
-        for tag in soup(["head", "noscript", "template"]):
-            tag.decompose()
-        text = re.sub(r"\n{3,}", "\n\n", converter.convert_soup(soup)).strip()
+        text = html_to_text(html_file.read_text(encoding="utf-8", errors="replace"))
         if text:
             documents.append(
                 populate_document_metadata(
