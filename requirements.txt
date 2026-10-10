@@ -1,6 +1,5 @@
 filelock
 numpy
-python-dotenv
 prompt_toolkit
 pypdfium2
 docx2txt

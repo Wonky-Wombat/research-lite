@@ -28,6 +28,35 @@ class LLMSettings:
     base_url: str = DEFAULT_OLLAMA_BASE_URL
 
 
+def load_env_file(start: Path | None = None) -> None:
+    """Load KEY=VALUE pairs from the nearest .env file without overriding the environment."""
+    directory = (start or Path.cwd()).resolve()
+    for candidate in (directory, *directory.parents):
+        path = candidate / ".env"
+        if path.is_file():
+            break
+    else:
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        entry = line.strip().removeprefix("export ").lstrip()
+        if not entry or entry.startswith("#") or "=" not in entry:
+            continue
+        key, _, value = entry.partition("=")
+        key = key.strip()
+        if not key or any(character.isspace() for character in key):
+            continue
+        value = value.strip()
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
+            quote, value = value[0], value[1:-1]
+            if quote == '"':
+                value = value.encode("utf-8").decode("unicode_escape")
+        os.environ.setdefault(key, value)
+
+
 def settings_path() -> Path:
     """Return the user-owned settings location, with a testable override."""
     override = os.environ.get("RESEARCHLITE_CONFIG_PATH")

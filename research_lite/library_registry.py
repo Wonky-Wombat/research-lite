@@ -14,11 +14,10 @@ import os
 import re
 import tempfile
 import tomllib
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-
-from filelock import FileLock
 
 from research_lite.settings import settings_path
 
@@ -146,7 +145,9 @@ def remove_library(name: str) -> LibraryRegistry:
         return updated
 
 
-def _registry_lock() -> FileLock:
+def _registry_lock() -> AbstractContextManager[object]:
+    from filelock import FileLock
+
     path = registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     return FileLock(str(path.with_name(f"{path.name}.lock")))

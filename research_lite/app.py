@@ -16,8 +16,6 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dotenv import load_dotenv
-
 from research_lite.defaults import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
@@ -33,7 +31,12 @@ from research_lite.library_registry import (
     select_library,
 )
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
-from research_lite.settings import LLMSettings, load_llm_settings, save_llm_settings
+from research_lite.settings import (
+    LLMSettings,
+    load_env_file,
+    load_llm_settings,
+    save_llm_settings,
+)
 
 if TYPE_CHECKING:
     from research_lite.embedding import EmbeddingService
@@ -329,7 +332,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     # Load environment variables from .env file if present
-    load_dotenv()
+    load_env_file()
 
     # Clean up API Key from env if present (remove whitespace/newlines)
     if os.environ.get("OPENAI_API_KEY"):
