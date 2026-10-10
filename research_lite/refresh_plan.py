@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from research_lite.ingestion import PDF_READER
 from research_lite.manifest import IngestionManifest
 from research_lite.utils.loader_utils import build_source_metadata, discover_files
 
@@ -57,6 +58,7 @@ def plan_library_refresh(
     configuration_changed = (
         recorded_fingerprint is not None and recorded_fingerprint != current_config_fingerprint
     )
+    pdf_reader_changed = manifest.state_value("pdf_reader") != PDF_READER
     plan = RefreshPlan(configuration_changed=configuration_changed)
     seen_paths: set[str] = set()
 
@@ -74,6 +76,7 @@ def plan_library_refresh(
             plan.new.append(source_file)
         elif (
             configuration_changed
+            or (pdf_reader_changed and source_metadata["ext"] == "pdf")
             or previous.indexed_source_id != source_metadata["source_id"]
             or previous.last_refresh_error is not None
         ):

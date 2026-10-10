@@ -15,6 +15,7 @@ from pathlib import Path
 
 from research_lite.embedding import EmbeddedDocument, EmbeddingService
 from research_lite.ingestion import (
+    PDF_READER,
     SUPPORTED_EXTENSIONS,
     IngestReport,
     load_documents,
@@ -178,6 +179,7 @@ def _apply_refresh_plan(
                     keep_indexed_version=False,
                 )
             manifest.set_state_value("config_fingerprint", current_config_fingerprint)
+        manifest.set_state_value("pdf_reader", PDF_READER)
         return result
     finally:
         manifest.close()

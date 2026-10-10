@@ -2,7 +2,7 @@ filelock
 numpy
 python-dotenv
 prompt_toolkit
-pypdf
+pypdfium2
 docx2txt
 fastembed
 python-calamine
