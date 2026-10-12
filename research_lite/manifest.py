@@ -161,6 +161,11 @@ class IngestionManifest:
             )
             raise RuntimeError(msg)
         connection.executescript(SCHEMA)
+        if _rebuild_chunk_tables_if_outdated(connection):
+            connection.execute(
+                "INSERT INTO library_state(key, value) VALUES ('config_fingerprint', '') "
+                "ON CONFLICT(key) DO UPDATE SET value = ''"
+            )
 
         for key, value in {
             "initialized_at": _utc_now(),
@@ -207,6 +212,12 @@ class IngestionManifest:
                     "Delete .researchlite and run `researchlite library sync` again."
                 )
                 raise RuntimeError(msg)
+            elif _rebuild_chunk_tables_if_outdated(connection):
+                connection.execute(
+                    "INSERT INTO library_state(key, value) VALUES ('config_fingerprint', '') "
+                    "ON CONFLICT(key) DO UPDATE SET value = ''"
+                )
+                connection.commit()
         except Exception:
             connection.close()
             raise
@@ -465,11 +476,34 @@ def _stored_schema_version(connection: sqlite3.Connection) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
+CHUNK_COLUMNS = ("source_path", "title", "source_unit", "chunk_id", "kind", "text")
+
+CHUNK_TABLES = (
+    "DROP TRIGGER IF EXISTS chunks_fts_insert;"
+    "DROP TRIGGER IF EXISTS chunks_fts_delete;"
+    "DROP TABLE IF EXISTS chunks_fts;"
+    "DROP TABLE IF EXISTS vectors;"
+    "DROP TABLE IF EXISTS chunks;"
+)
+
+
+def _rebuild_chunk_tables_if_outdated(connection: sqlite3.Connection) -> bool:
+    """Recreate the chunk tables when they lack a column, so one re-index can refill them."""
+    stored = {str(row["name"]) for row in connection.execute("PRAGMA table_info(chunks)")}
+    if not stored or stored.issuperset(CHUNK_COLUMNS):
+        return False
+    connection.executescript(CHUNK_TABLES)
+    connection.executescript(SCHEMA)
+    return True
+
+
 def _upgrade_schema(state_dir: Path, connection: sqlite3.Connection, version: str) -> None:
     connection.executescript(SCHEMA)
+    rebuilt = _rebuild_chunk_tables_if_outdated(connection)
+    rechunk = rebuilt or version in RECHUNK_SCHEMA_VERSIONS
     connection.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
     values = {"schema_version": SCHEMA_VERSION}
-    if version in RECHUNK_SCHEMA_VERSIONS:
+    if rechunk:
         values["config_fingerprint"] = ""
     for key, value in values.items():
         connection.execute(
