@@ -16,22 +16,27 @@ from research_lite import Document
 from research_lite.citations import citation_sources
 from research_lite.library_stats import LibraryStats
 from research_lite.query_session import (
+    HISTORY_TURNS,
     LibraryQuerySession,
     QueryOutcome,
     format_evidence,
     query_warnings,
 )
 
-AnswerGenerator = Callable[[str, Sequence[Document]], str | None]
+HISTORY_ANSWER_CHARS = 500
+
+AnswerGenerator = Callable[[str, Sequence[Document], Sequence[tuple[str, str]]], str | None]
 Output = Callable[[str], None]
 
 _HELP_TEXT = """Commands:
   /help       Show this help message.
   /library    Show local library statistics.
   /sources    Show the full retrieved evidence from the last question.
+  /reset      Forget the conversation so far and start a fresh topic.
   /exit       Leave the chat. Ctrl-D also exits.
 
-Ask a question to search the loaded library. Each question is retrieved independently."""
+Ask a question to search the loaded library. Follow-up questions use the recent turns to work
+out what they refer to; use /reset when you change topic."""
 
 _COUNT_QUESTION = re.compile(
     r"\b(?:how many|number of|count)\b.*\b(?:papers?|documents?|pdfs?|files?)\b",
@@ -63,6 +68,7 @@ class TerminalChat:
         self._library_stats = library_stats
         self._output = output
         self._last_documents: list[Document] = []
+        self._history: list[tuple[str, str]] = []
 
     def run(self) -> None:
         """Start the prompt loop until the user exits or closes standard input."""
@@ -101,6 +107,11 @@ class TerminalChat:
             if question == "/sources":
                 self._show_sources()
                 continue
+            if question == "/reset":
+                self._history.clear()
+                self._last_documents = []
+                self._output("Conversation cleared.")
+                continue
             if question.startswith("/"):
                 self._output("Unknown command. Type /help for available commands.")
                 continue
@@ -111,7 +122,7 @@ class TerminalChat:
                 self._answer(question)
 
     def _answer(self, question: str) -> None:
-        outcome = self._query_session.query(question)
+        outcome = self._query_session.query(question, self._history)
         self._last_documents = outcome.documents
         self._print_retrieval_notice(outcome)
         if not outcome.documents:
@@ -122,17 +133,24 @@ class TerminalChat:
             self._output("Generation is disabled. Type /sources to inspect retrieved evidence.")
         else:
             try:
-                answer = self._generate_answer(question, outcome.documents)
+                answer = self._generate_answer(question, outcome.documents, self._history)
             except Exception as exc:
                 self._output(f"Failed to generate answer: {exc}")
             else:
                 self._output(f"\nAnswer:\n{answer or 'No answer was generated.'}")
+                if answer:
+                    self._remember(question, answer)
         self._output(f"\nSources:\n{_source_summary(outcome.documents)}")
         self._output("Type /sources for excerpts and full metadata.")
 
     def _print_retrieval_notice(self, outcome: QueryOutcome) -> None:
         for warning in query_warnings(outcome):
             self._output(warning)
+
+    def _remember(self, question: str, answer: str) -> None:
+        """Keep the recent turns, trimming each answer so evidence keeps most of the context."""
+        self._history.append((question, answer[:HISTORY_ANSWER_CHARS]))
+        del self._history[:-HISTORY_TURNS]
 
     def _show_sources(self) -> None:
         if not self._last_documents:

@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 
 WEAK_MATCH_SCORE = -5.0
+HISTORY_TURNS = 3
+RETRIEVAL_HISTORY_TURNS = 1
 
 
 @dataclass(frozen=True)
@@ -70,12 +72,13 @@ class LibraryQuerySession:
             reranker=reranker,
         )
 
-    def query(self, question: str) -> QueryOutcome:
-        """Retrieve evidence for one independent user question."""
-        query_vector = self._embedding_service.embed_query(question)
+    def query(self, question: str, history: Sequence[tuple[str, str]] = ()) -> QueryOutcome:
+        """Retrieve evidence for a question, using earlier turns to resolve what it refers to."""
+        retrieval_text = retrieval_query(question, history)
+        query_vector = self._embedding_service.embed_query(retrieval_text)
         try:
             documents, best_score = self._retriever.search_with_best_score(
-                question,
+                retrieval_text,
                 query_vector,
                 mode=self._retrieval_mode,
                 k=self._top_k,
@@ -85,7 +88,7 @@ class LibraryQuerySession:
             if self._retrieval_mode != "hybrid-rerank":
                 raise
             documents = self._retriever.search(
-                question,
+                retrieval_text,
                 query_vector,
                 mode="hybrid",
                 k=self._top_k,
@@ -172,6 +175,14 @@ def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
             for match in matching_sources(outcome)
         ],
     }
+
+
+def retrieval_query(question: str, history: Sequence[tuple[str, str]] = ()) -> str:
+    """Prefix a follow-up with recent questions so pronouns still retrieve the right passages."""
+    if not history:
+        return question
+    earlier = [past_question for past_question, _ in history[-RETRIEVAL_HISTORY_TURNS:]]
+    return " ".join([*earlier, question])
 
 
 def query_warnings(outcome: QueryOutcome) -> list[str]:
