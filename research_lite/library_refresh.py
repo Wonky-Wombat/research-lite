@@ -31,6 +31,17 @@ from research_lite.utils.loader_utils import build_source_metadata
 TITLE_RULES = "1"
 
 
+@dataclass(frozen=True)
+class RefreshProgress:
+    """How far a refresh has got, reported before each source is indexed."""
+
+    source: Path
+    index: int
+    total: int
+    done_bytes: int
+    total_bytes: int
+
+
 @dataclass
 class RefreshResult:
     """The outcome of applying a library refresh plan."""
@@ -49,6 +60,7 @@ def refresh_library(
     load_embedding_service: Callable[[], EmbeddingService],
     split_config: SplitConfig,
     extensions: list[str] | None = None,
+    on_progress: Callable[[RefreshProgress], None] | None = None,
 ) -> RefreshResult:
     """Synchronize a library while holding an exclusive refresh lock."""
     root = library_root.expanduser().resolve()
@@ -79,6 +91,7 @@ def refresh_library(
                     embedding_service=load_embedding_service(),
                     split_config=split_config,
                     extensions=normalized_extensions,
+                    on_progress=on_progress,
                 )
             except BaseException:
                 backup.restore()
@@ -86,6 +99,13 @@ def refresh_library(
             backup.complete()
         _refresh_titles(root, plan.unchanged)
         return result
+
+
+def _source_size(source: Path) -> int:
+    try:
+        return source.stat().st_size
+    except OSError:
+        return 0
 
 
 def _refresh_titles(root: Path, sources: list[Path]) -> None:
@@ -112,6 +132,7 @@ def _apply_refresh_plan(
     embedding_service: EmbeddingService,
     split_config: SplitConfig,
     extensions: list[str],
+    on_progress: Callable[[RefreshProgress], None] | None = None,
 ) -> RefreshResult:
     """Synchronize a library's stored chunks and source manifest.
 
@@ -126,7 +147,21 @@ def _apply_refresh_plan(
         successful_changed: list[Path] = []
         successful_sources: list[tuple[Path, str]] = []
         failed_source_messages: list[tuple[Path, str]] = []
-        for source_file in pending_sources:
+        sizes = [_source_size(source) for source in pending_sources]
+        total_bytes = sum(sizes)
+        done_bytes = 0
+        for index, source_file in enumerate(pending_sources, start=1):
+            if on_progress is not None:
+                on_progress(
+                    RefreshProgress(
+                        source=source_file,
+                        index=index,
+                        total=len(pending_sources),
+                        done_bytes=done_bytes,
+                        total_bytes=total_bytes,
+                    )
+                )
+            done_bytes += sizes[index - 1]
             report = IngestReport()
             try:
                 documents = load_documents(str(source_file), extensions=extensions, report=report)
@@ -185,4 +220,4 @@ def _apply_refresh_plan(
         manifest.close()
 
 
-__all__ = ["RefreshResult", "refresh_library"]
+__all__ = ["RefreshProgress", "RefreshResult", "refresh_library"]

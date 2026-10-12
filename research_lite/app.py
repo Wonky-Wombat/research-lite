@@ -13,6 +13,9 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import json
+import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,10 +41,12 @@ from research_lite.settings import (
     save_llm_settings,
 )
 
+PROGRESS_WIDTH = 72
+
 if TYPE_CHECKING:
     from research_lite.embedding import EmbeddingService
     from research_lite.generation import RAGGenerator
-    from research_lite.library_refresh import RefreshResult
+    from research_lite.library_refresh import RefreshProgress, RefreshResult
     from research_lite.preprocessing import SplitConfig
     from research_lite.retrieval import RetrievalMode
     from research_lite.vectorstore import LibraryIndex
@@ -112,6 +117,38 @@ def _print_refresh_result(result: RefreshResult) -> None:
         print(f"  Refresh failed: {source_file}")
 
 
+def _format_eta(seconds: float) -> str:
+    minutes, remainder = divmod(int(seconds + 0.5), 60)
+    return f"{minutes}m{remainder:02d}s" if minutes else f"{remainder}s"
+
+
+def _progress_printer() -> Callable[[RefreshProgress], None] | None:
+    """Return a terminal progress callback, or None when output is not a terminal."""
+    if not sys.stderr.isatty():
+        return None
+    started: list[float] = []
+
+    def report(progress: RefreshProgress) -> None:
+        if not started:
+            started.append(time.monotonic())
+        elapsed = time.monotonic() - started[0]
+        share = progress.done_bytes / progress.total_bytes if progress.total_bytes else 0.0
+        eta = ""
+        if share > 0.05 and elapsed > 1.0:
+            eta = f"  ETA {_format_eta(elapsed / share - elapsed)}"
+        line = f"Indexing {progress.index}/{progress.total}  {progress.source.name}{eta}"
+        sys.stderr.write(f"\r{line[:PROGRESS_WIDTH]:<{PROGRESS_WIDTH}}")
+        sys.stderr.flush()
+
+    return report
+
+
+def _clear_progress() -> None:
+    if sys.stderr.isatty():
+        sys.stderr.write(f"\r{'':<{PROGRESS_WIDTH}}\r")
+        sys.stderr.flush()
+
+
 def _refresh_library(
     parser: argparse.ArgumentParser,
     *,
@@ -140,9 +177,12 @@ def _refresh_library(
             load_embedding_service=load_embedding_service,
             split_config=split_config,
             extensions=args.extensions,
+            on_progress=_progress_printer(),
         )
     except (LibraryRefreshLockedError, FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
+    finally:
+        _clear_progress()
     _print_refresh_result(result)
 
 
@@ -331,6 +371,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run the command line, leaving no traceback when an operation is interrupted."""
+    try:
+        _run()
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+
+
+def _run() -> None:
     # Load environment variables from .env file if present
     load_env_file()
 
