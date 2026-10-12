@@ -8,6 +8,7 @@
 import hashlib
 import os
 from collections.abc import Iterable
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,46 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+IGNORE_FILENAME = ".researchliteignore"
+
+
+def load_ignore_rules(library_root: Path) -> list[tuple[str, bool, bool]]:
+    """Read ``.researchliteignore`` as ordered (pattern, negated, directory only) rules."""
+    path = library_root / IGNORE_FILENAME
+    if not path.is_file():
+        return []
+    rules: list[tuple[str, bool, bool]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        negated = entry.startswith("!")
+        entry = entry.removeprefix("!").strip()
+        directory_only = entry.endswith("/")
+        entry = entry.rstrip("/")
+        if entry:
+            rules.append((entry, negated, directory_only))
+    return rules
+
+
+def is_ignored(
+    relative_path: str, rules: list[tuple[str, bool, bool]], *, is_directory: bool
+) -> bool:
+    """Apply ignore rules in order, letting the last matching rule decide."""
+    ignored = False
+    segments = relative_path.split("/")
+    for pattern, negated, directory_only in rules:
+        if directory_only and not is_directory:
+            continue
+        if "/" in pattern:
+            matched = fnmatch(relative_path, pattern) or fnmatch(relative_path, f"*/{pattern}")
+        else:
+            matched = any(fnmatch(segment, pattern) for segment in segments)
+        if matched:
+            ignored = not negated
+    return ignored
+
+
 def discover_files(path: str, extensions: Iterable[str]) -> list[Path]:
     """Discover supported files once, in a stable order, without cache directories."""
     base_path = Path(path)
@@ -39,15 +80,25 @@ def discover_files(path: str, extensions: Iterable[str]) -> list[Path]:
         suffix = base_path.suffix.lower().lstrip(".")
         return [base_path] if suffix in normalized_exts and not base_path.is_symlink() else []
 
+    rules = load_ignore_rules(base_path)
     discovered: list[Path] = []
     for directory, subdirectories, filenames in os.walk(base_path, followlinks=False):
-        subdirectories[:] = sorted(name for name in subdirectories if not name.startswith("."))
         current_dir = Path(directory)
+        prefix = current_dir.relative_to(base_path).as_posix()
+        subdirectories[:] = sorted(
+            name
+            for name in subdirectories
+            if not name.startswith(".")
+            and not is_ignored(f"{prefix}/{name}".lstrip("/"), rules, is_directory=True)
+        )
         for filename in sorted(filenames):
             file_path = current_dir / filename
             suffix = file_path.suffix.lower().lstrip(".")
-            if suffix in normalized_exts and not file_path.is_symlink():
-                discovered.append(file_path)
+            if suffix not in normalized_exts or file_path.is_symlink():
+                continue
+            if is_ignored(f"{prefix}/{filename}".lstrip("/"), rules, is_directory=False):
+                continue
+            discovered.append(file_path)
 
     return sorted(discovered, key=lambda item: item.relative_to(base_path).as_posix())
 
