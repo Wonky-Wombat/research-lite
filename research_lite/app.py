@@ -187,6 +187,26 @@ def _refresh_library(
     _print_refresh_result(result)
 
 
+def _print_context(
+    parser: argparse.ArgumentParser, library_root: Path, args: argparse.Namespace
+) -> None:
+    """Print one stored passage with its neighbours, without loading any model."""
+    from research_lite.query_session import context_json, format_context
+
+    manifest = IngestionManifest.open(library_root)
+    try:
+        documents = manifest.chunk_neighbourhood(args.context, radius=args.context_radius)
+    finally:
+        manifest.close()
+    if not documents:
+        parser.error(f"No indexed passage with chunk_id '{args.context}'.")
+    if args.json:
+        print(json.dumps(context_json(args.context, documents), ensure_ascii=False))
+        return
+    for line in format_context(args.context, documents):
+        print(line)
+
+
 def _require_active_library(parser: argparse.ArgumentParser, registry: LibraryRegistry) -> Path:
     """Return the selected library or give a useful first-run command."""
     if registry.active is None:
@@ -349,6 +369,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="With --query, print retrieved evidence as JSON and skip LLM generation.",
     )
     parser.add_argument(
+        "--context",
+        metavar="CHUNK_ID",
+        help="Print the passage with this chunk_id together with its neighbours.",
+    )
+    parser.add_argument(
+        "--context-radius",
+        type=int,
+        default=1,
+        help="Neighbouring passages to show on each side of --context (default: 1).",
+    )
+    parser.add_argument(
         "--files",
         action="store_true",
         help=(
@@ -399,10 +430,14 @@ def _run() -> None:
     args = parser.parse_args()
     if args.command == "library" and args.library_command is None:
         parser.error("`researchlite library` requires a command.")
-    if args.json and not args.query:
-        parser.error("--json requires --query.")
+    if args.json and not (args.query or args.context):
+        parser.error("--json requires --query or --context.")
     if args.files and not args.query:
         parser.error("--files requires --query.")
+    if args.context and (args.query or args.chat):
+        parser.error("--context cannot be combined with --query or --chat.")
+    if args.context_radius < 0:
+        parser.error("--context-radius cannot be negative.")
     try:
         library_registry = load_library_registry()
     except RuntimeError as exc:
@@ -452,7 +487,7 @@ def _run() -> None:
     else:
         args.path = str(_require_active_library(parser, library_registry))
         one_click_launch = False
-        if not args.query:
+        if not args.query and not args.context:
             args.chat = True
 
     try:
@@ -530,6 +565,10 @@ def _run() -> None:
             f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
             "Run `researchlite library sync` to create and synchronize it."
         )
+    if args.context:
+        _print_context(parser, library_root, args)
+        return
+
     service = build_default_embedding_service(
         model_name=args.model_name,
         device=args.device,

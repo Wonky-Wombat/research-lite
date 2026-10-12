@@ -168,6 +168,35 @@ def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
     }
 
 
+def format_context(chunk_id: str, documents: Sequence[Document]) -> list[str]:
+    """Render a chunk and its neighbours, marking the one that was asked for."""
+    lines = []
+    for document in documents:
+        metadata = document.metadata
+        marker = ">" if str(metadata.get("chunk_id", "")) == chunk_id else " "
+        title = str(metadata.get("title", "Unknown"))
+        lines.append(f"{marker} {title}{page_label(metadata)}\n  {document.page_content}")
+    return lines
+
+
+def context_json(chunk_id: str, documents: Sequence[Document]) -> dict[str, object]:
+    """Return a chunk and its neighbours as JSON."""
+    return {
+        "chunk_id": chunk_id,
+        "passages": [
+            {
+                "chunk_id": document.metadata.get("chunk_id"),
+                "title": str(document.metadata.get("title", "Unknown")),
+                "path": str(document.metadata.get("source_path", "")),
+                "page": page_number(document.metadata),
+                "matched": str(document.metadata.get("chunk_id", "")) == chunk_id,
+                "text": document.page_content,
+            }
+            for document in documents
+        ],
+    }
+
+
 def evidence_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
     citation_numbers = citation_number_by_source(outcome.documents)
     results = []

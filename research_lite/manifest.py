@@ -361,6 +361,37 @@ class IngestionManifest:
         ).fetchall()
         return [int(row[0]) for row in rows]
 
+    def chunk_neighbourhood(self, chunk_id: str, *, radius: int) -> list[Document]:
+        """Return a stored chunk together with its neighbours from the same source."""
+        from research_lite import Document
+        from research_lite.chunk_kind import BODY
+
+        anchor = self._connection.execute(
+            "SELECT id, source_path FROM chunks WHERE chunk_id = ? ORDER BY id LIMIT 1",
+            (chunk_id,),
+        ).fetchone()
+        if anchor is None:
+            return []
+        cursor = self._connection.execute(
+            "SELECT title, source_unit, chunk_id, kind, text FROM chunks "
+            "WHERE source_path = ? AND id BETWEEN ? AND ? ORDER BY id",
+            (anchor["source_path"], int(anchor["id"]) - radius, int(anchor["id"]) + radius),
+        )
+        cursor.row_factory = None
+        return [
+            Document(
+                page_content=text,
+                metadata={
+                    "source_path": str(anchor["source_path"]),
+                    "title": title,
+                    "source_unit": source_unit,
+                    "chunk_id": neighbour_id,
+                    "kind": kind or BODY,
+                },
+            )
+            for title, source_unit, neighbour_id, kind, text in cursor
+        ]
+
     def load_chunks(self) -> tuple[list[int], list[Document], np.ndarray]:
         """Return stored chunks and their vectors as one float32 matrix."""
         import numpy as np
