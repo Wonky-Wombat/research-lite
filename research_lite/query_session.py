@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,75 @@ def format_evidence(documents: Sequence[Document]) -> list[str]:
         citation_number = citation_numbers.get(source_path or str(title), 0)
         output.append(f"[{citation_number}] {title}{page_label(document.metadata)}\n  {preview}")
     return output
+
+
+@dataclass(frozen=True)
+class SourceMatch:
+    """One library file that matched a query, with how strongly it matched."""
+
+    rank: int
+    title: str
+    source_path: str
+    passages: int
+    best_page: int | None
+
+
+def matching_sources(outcome: QueryOutcome) -> list[SourceMatch]:
+    """Group retrieved chunks by file, keeping the order of their best passage."""
+    order: list[str] = []
+    titles: dict[str, str] = {}
+    counts: Counter[str] = Counter()
+    best_pages: dict[str, int | None] = {}
+    for document in outcome.documents:
+        metadata = document.metadata
+        key = str(metadata.get("source_path", "")) or str(metadata.get("title", ""))
+        if key not in titles:
+            order.append(key)
+            titles[key] = str(metadata.get("title", "Unknown"))
+            best_pages[key] = page_number(metadata)
+        counts[key] += 1
+    return [
+        SourceMatch(
+            rank=rank,
+            title=titles[key],
+            source_path=key,
+            passages=counts[key],
+            best_page=best_pages[key],
+        )
+        for rank, key in enumerate(order, start=1)
+    ]
+
+
+def format_sources(matches: Sequence[SourceMatch]) -> list[str]:
+    """Render one line per matching file for terminal output."""
+    lines = []
+    for match in matches:
+        page = f", page {match.best_page}" if match.best_page is not None else ""
+        plural = "" if match.passages == 1 else "s"
+        lines.append(f"[{match.rank}] {match.title}{page}  ({match.passages} passage{plural})")
+    return lines
+
+
+def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
+    """Return the matching files for a query as JSON."""
+    warnings = (
+        ["Reranker unavailable; used hybrid retrieval."] if outcome.reranker_unavailable else []
+    )
+    return {
+        "query": question,
+        "retrieval_mode": outcome.retrieval_mode,
+        "warnings": warnings,
+        "files": [
+            {
+                "rank": match.rank,
+                "title": match.title,
+                "path": match.source_path,
+                "page": match.best_page,
+                "passages": match.passages,
+            }
+            for match in matching_sources(outcome)
+        ],
+    }
 
 
 def evidence_json(question: str, outcome: QueryOutcome) -> dict[str, object]:

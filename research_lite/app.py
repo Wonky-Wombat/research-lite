@@ -42,6 +42,7 @@ from research_lite.settings import (
 )
 
 PROGRESS_WIDTH = 72
+FILES_MODE_CHUNKS = 40
 
 if TYPE_CHECKING:
     from research_lite.embedding import EmbeddingService
@@ -348,6 +349,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="With --query, print retrieved evidence as JSON and skip LLM generation.",
     )
     parser.add_argument(
+        "--files",
+        action="store_true",
+        help=(
+            "With --query, list the matching files instead of passages, "
+            f"searching the top {FILES_MODE_CHUNKS} chunks."
+        ),
+    )
+    parser.add_argument(
         "--no-generation",
         action="store_true",
         help="Skip LLM generation and show retrieved evidence only.",
@@ -392,6 +401,8 @@ def _run() -> None:
         parser.error("`researchlite library` requires a command.")
     if args.json and not args.query:
         parser.error("--json requires --query.")
+    if args.files and not args.query:
+        parser.error("--files requires --query.")
     try:
         library_registry = load_library_registry()
     except RuntimeError as exc:
@@ -411,7 +422,14 @@ def _run() -> None:
     from research_lite.ingestion import SUPPORTED_EXTENSIONS
     from research_lite.library_stats import inspect_library
     from research_lite.preprocessing import SplitConfig
-    from research_lite.query_session import LibraryQuerySession, evidence_json, format_evidence
+    from research_lite.query_session import (
+        LibraryQuerySession,
+        evidence_json,
+        format_evidence,
+        format_sources,
+        matching_sources,
+        sources_json,
+    )
     from research_lite.retrieval import CrossEncoderReranker, RerankerUnavailableError
     from research_lite.utils.loader_utils import discover_files
 
@@ -551,7 +569,7 @@ def _run() -> None:
         index,
         service,
         retrieval_mode=retrieval_mode,
-        top_k=args.top_k,
+        top_k=max(args.top_k, FILES_MODE_CHUNKS) if args.files else args.top_k,
         candidate_k=args.retrieval_candidates,
         rrf_constant=args.rrf_constant,
         reranker=reranker,
@@ -580,6 +598,20 @@ def _run() -> None:
             generate_answer=generator.generate_answer if generator else None,
             library_stats=library_stats,
         ).run()
+        return
+
+    if args.files:
+        outcome = session.query(args.query)
+        if args.json:
+            print(json.dumps(sources_json(args.query, outcome), ensure_ascii=False))
+            return
+        matches = matching_sources(outcome)
+        if not matches:
+            print("No matching files found.")
+            return
+        print(f"Files matching {args.query!r}:")
+        for line in format_sources(matches):
+            print(line)
         return
 
     if args.json:
