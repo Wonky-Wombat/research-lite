@@ -15,7 +15,12 @@ from collections.abc import Callable, Sequence
 from research_lite import Document
 from research_lite.citations import citation_sources
 from research_lite.library_stats import LibraryStats
-from research_lite.query_session import LibraryQuerySession, QueryOutcome, format_evidence
+from research_lite.query_session import (
+    LibraryQuerySession,
+    QueryOutcome,
+    format_evidence,
+    query_warnings,
+)
 
 AnswerGenerator = Callable[[str, Sequence[Document]], str | None]
 Output = Callable[[str], None]
@@ -126,8 +131,8 @@ class TerminalChat:
         self._output("Type /sources for excerpts and full metadata.")
 
     def _print_retrieval_notice(self, outcome: QueryOutcome) -> None:
-        if outcome.reranker_unavailable:
-            self._output("Reranker unavailable; using hybrid retrieval instead.")
+        for warning in query_warnings(outcome):
+            self._output(warning)
 
     def _show_sources(self) -> None:
         if not self._last_documents:

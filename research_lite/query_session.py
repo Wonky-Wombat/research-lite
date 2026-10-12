@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
+WEAK_MATCH_SCORE = -5.0
+
+
 @dataclass(frozen=True)
 class QueryOutcome:
     """Documents returned from a query and the retrieval mode actually used."""
@@ -35,6 +38,12 @@ class QueryOutcome:
     documents: list[Document]
     retrieval_mode: RetrievalMode
     reranker_unavailable: bool = False
+    best_score: float | None = None
+
+    @property
+    def weak_match(self) -> bool:
+        """Whether the best passage scored too low to be worth trusting."""
+        return self.best_score is not None and self.best_score < WEAK_MATCH_SCORE
 
 
 class LibraryQuerySession:
@@ -65,7 +74,7 @@ class LibraryQuerySession:
         """Retrieve evidence for one independent user question."""
         query_vector = self._embedding_service.embed_query(question)
         try:
-            documents = self._retriever.search(
+            documents, best_score = self._retriever.search_with_best_score(
                 question,
                 query_vector,
                 mode=self._retrieval_mode,
@@ -83,7 +92,7 @@ class LibraryQuerySession:
                 candidate_k=self._candidate_k,
             )
             return QueryOutcome(documents, retrieval_mode="hybrid", reranker_unavailable=True)
-        return QueryOutcome(documents, retrieval_mode=self._retrieval_mode)
+        return QueryOutcome(documents, retrieval_mode=self._retrieval_mode, best_score=best_score)
 
 
 def format_evidence(documents: Sequence[Document]) -> list[str]:
@@ -148,13 +157,10 @@ def format_sources(matches: Sequence[SourceMatch]) -> list[str]:
 
 def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
     """Return the matching files for a query as JSON."""
-    warnings = (
-        ["Reranker unavailable; used hybrid retrieval."] if outcome.reranker_unavailable else []
-    )
     return {
         "query": question,
         "retrieval_mode": outcome.retrieval_mode,
-        "warnings": warnings,
+        "warnings": query_warnings(outcome),
         "files": [
             {
                 "rank": match.rank,
@@ -166,6 +172,16 @@ def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
             for match in matching_sources(outcome)
         ],
     }
+
+
+def query_warnings(outcome: QueryOutcome) -> list[str]:
+    """Return the notices a caller should repeat to the user."""
+    warnings = []
+    if outcome.reranker_unavailable:
+        warnings.append("Reranker unavailable; used hybrid retrieval.")
+    if outcome.weak_match:
+        warnings.append("No strongly relevant passage was found; the library may not cover this.")
+    return warnings
 
 
 def format_context(chunk_id: str, documents: Sequence[Document]) -> list[str]:
@@ -215,12 +231,9 @@ def evidence_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
                 "text": document.page_content,
             }
         )
-    warnings = (
-        ["Reranker unavailable; used hybrid retrieval."] if outcome.reranker_unavailable else []
-    )
     return {
         "query": question,
         "retrieval_mode": outcome.retrieval_mode,
-        "warnings": warnings,
+        "warnings": query_warnings(outcome),
         "results": results,
     }

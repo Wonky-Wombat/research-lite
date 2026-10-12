@@ -105,8 +105,8 @@ class CrossEncoderReranker:
         """Load the reranker before an interactive session starts."""
         self._get_model()
 
-    def rerank(self, query: str, documents: Sequence[Document]) -> list[Document]:
-        """Return the candidate chunks ordered by cross-encoder relevance."""
+    def rerank(self, query: str, documents: Sequence[Document]) -> list[tuple[Document, float]]:
+        """Return the candidate chunks with their relevance scores, best first."""
         if not documents:
             return []
         model = cast(_CrossEncoder, self._get_model())
@@ -117,10 +117,11 @@ class CrossEncoderReranker:
                 batch_size=self._batch_size,
             )
         )
-        ranked = sorted(
-            zip(documents, scores, strict=True), key=lambda item: float(item[1]), reverse=True
+        return sorted(
+            ((document, float(score)) for document, score in zip(documents, scores, strict=True)),
+            key=lambda item: item[1],
+            reverse=True,
         )
-        return [document for document, _ in ranked]
 
 
 def _body_first(documents: Sequence[Document], *, k: int) -> list[Document]:
@@ -164,8 +165,22 @@ class HybridRetriever:
         candidate_k: int = 20,
     ) -> list[Document]:
         """Retrieve top chunks using dense, hybrid, or hybrid-rerank search."""
+        return self.search_with_best_score(
+            query, query_vector, mode=mode, k=k, candidate_k=candidate_k
+        )[0]
+
+    def search_with_best_score(
+        self,
+        query: str,
+        query_vector: Sequence[float],
+        *,
+        mode: RetrievalMode = "dense",
+        k: int = 4,
+        candidate_k: int = 20,
+    ) -> tuple[list[Document], float | None]:
+        """Retrieve top chunks and the best relevance score, when a reranker provides one."""
         if k < 1 or candidate_k < 1:
-            return []
+            return [], None
         if mode not in {"dense", "hybrid", "hybrid-rerank"}:
             msg = f"Unsupported retrieval mode: {mode}."
             raise ValueError(msg)
@@ -173,15 +188,18 @@ class HybridRetriever:
         fetch_k = max(k, candidate_k)
         dense_results = self._index.similarity_search(query_vector, k=fetch_k)
         if mode == "dense":
-            return self._select(query, dense_results, k=k)
+            return self._select(query, dense_results, k=k), None
 
         lexical_results = self._index.keyword_search(query, k=fetch_k)
         fused_results = reciprocal_rank_fusion(
             (dense_results, lexical_results), k=fetch_k, constant=self._rrf_constant
         )
+        best_score: float | None = None
         if mode == "hybrid-rerank":
             if self._reranker is None:
                 msg = "hybrid-rerank mode requires a configured cross-encoder reranker."
                 raise ValueError(msg)
-            fused_results = self._reranker.rerank(query, fused_results)
-        return self._select(query, fused_results, k=k)
+            scored = self._reranker.rerank(query, fused_results)
+            fused_results = [document for document, _ in scored]
+            best_score = scored[0][1] if scored else None
+        return self._select(query, fused_results, k=k), best_score

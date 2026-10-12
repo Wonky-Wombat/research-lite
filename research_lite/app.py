@@ -463,6 +463,7 @@ def _run() -> None:
         format_evidence,
         format_sources,
         matching_sources,
+        query_warnings,
         sources_json,
     )
     from research_lite.retrieval import CrossEncoderReranker, RerankerUnavailableError
@@ -660,8 +661,8 @@ def _run() -> None:
     print(f"Running {retrieval_mode} search for query: {args.query!r}")
     outcome = session.query(args.query)
     results = outcome.documents
-    if outcome.reranker_unavailable:
-        print("Reranker unavailable; falling back to hybrid retrieval.")
+    for warning in query_warnings(outcome):
+        print(warning)
     if not results:
         print("No results returned from retrieval.")
     else:
