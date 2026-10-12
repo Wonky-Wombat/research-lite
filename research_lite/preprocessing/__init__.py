@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from research_lite import Document
+from research_lite.chunk_kind import classify_chunk, reference_start_unit
 
 from ..utils.loader_utils import _sha1
 
@@ -95,6 +96,35 @@ def _merge_pieces(pieces: list[str], separator: str, size: int, overlap: int) ->
     return [chunk for chunk in chunks if chunk]
 
 
+def _reference_starts(documents: list[Document]) -> dict[str, int]:
+    """Find where each source's reference list starts, keeping unit order per source."""
+    pages_by_source: dict[str, list[tuple[int, str]]] = {}
+    for document in documents:
+        source = str(document.metadata.get("source_path", ""))
+        unit = _unit_index(document)
+        if unit is not None:
+            pages_by_source.setdefault(source, []).append((unit, document.page_content))
+    starts: dict[str, int] = {}
+    for source, pages in pages_by_source.items():
+        ordered = [text for _, text in sorted(pages)]
+        start = reference_start_unit(ordered)
+        if start is not None:
+            starts[source] = sorted(unit for unit, _ in pages)[start]
+    return starts
+
+
+def _unit_index(document: Document) -> int | None:
+    unit = str(document.metadata.get("source_unit", ""))
+    suffix = unit.rpartition("-")[2]
+    return int(suffix) if suffix.isdigit() else None
+
+
+def _is_after_references(document: Document, starts: dict[str, int]) -> bool:
+    start = starts.get(str(document.metadata.get("source_path", "")))
+    unit = _unit_index(document)
+    return start is not None and unit is not None and unit >= start
+
+
 def split_documents(
     documents: Iterable[Document], config: SplitConfig | None = None
 ) -> list[Document]:
@@ -102,8 +132,10 @@ def split_documents(
     cfg = config or SplitConfig()
     if cfg.keep_separator:
         raise ValueError("keep_separator=True is not supported.")
+    ordered = list(documents)
+    reference_starts = _reference_starts(ordered)
     chunked_docs: list[Document] = []
-    for document in documents:
+    for document in ordered:
         ext = str(document.metadata.get("ext", "") or "").lower()
         separators = _select_separators(ext, cfg)
         cleaned_content = _normalize_text(document.page_content)
@@ -129,6 +161,10 @@ def split_documents(
                 "chunk_index": index,
                 "num_chunks": total_chunks,
                 "chunk_id": chunk_id,
+                "kind": classify_chunk(
+                    chunk.page_content,
+                    after_references=_is_after_references(document, reference_starts),
+                ),
             }
             chunk.metadata = metadata
             chunked_docs.append(chunk)

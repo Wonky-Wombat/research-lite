@@ -25,9 +25,10 @@ if TYPE_CHECKING:
     from research_lite.embedding import EmbeddedDocument
     from research_lite.preprocessing import SplitConfig
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 FAISS_SCHEMA_VERSION = "2"
-UPGRADABLE_SCHEMA_VERSIONS = (FAISS_SCHEMA_VERSION, "3")
+RECHUNK_SCHEMA_VERSIONS = (FAISS_SCHEMA_VERSION, "4")
+UPGRADABLE_SCHEMA_VERSIONS = (*RECHUNK_SCHEMA_VERSIONS, "3")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_state (
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     title TEXT NOT NULL,
     source_unit TEXT NOT NULL,
     chunk_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'body',
     text TEXT NOT NULL
 );
 
@@ -303,13 +305,14 @@ class IngestionManifest:
         for embedded in embedded_documents:
             metadata = embedded.document.metadata
             cursor = self._connection.execute(
-                "INSERT INTO chunks(source_path, title, source_unit, chunk_id, text) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO chunks(source_path, title, source_unit, chunk_id, kind, text) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     _canonical_path(metadata["source_path"]),
                     str(metadata.get("title", "")),
                     str(metadata.get("source_unit", "")),
                     str(metadata["chunk_id"]),
+                    str(metadata.get("kind", "body")),
                     embedded.document.page_content,
                 ),
             )
@@ -365,7 +368,8 @@ class IngestionManifest:
         from research_lite import Document
 
         cursor = self._connection.execute(
-            "SELECT id, source_path, title, source_unit, chunk_id, text FROM chunks ORDER BY id"
+            "SELECT id, source_path, title, source_unit, chunk_id, kind, text FROM chunks "
+            "ORDER BY id"
         )
         cursor.row_factory = None
         rows = cursor.fetchall()
@@ -377,9 +381,10 @@ class IngestionManifest:
                     "title": title,
                     "source_unit": source_unit,
                     "chunk_id": chunk_id,
+                    "kind": kind,
                 },
             )
-            for _, source_path, title, source_unit, chunk_id, text in rows
+            for _, source_path, title, source_unit, chunk_id, kind, text in rows
         ]
         ids = [int(row[0]) for row in rows]
         if not documents:
@@ -433,7 +438,7 @@ def _upgrade_schema(state_dir: Path, connection: sqlite3.Connection, version: st
     connection.executescript(SCHEMA)
     connection.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
     values = {"schema_version": SCHEMA_VERSION}
-    if version == FAISS_SCHEMA_VERSION:
+    if version in RECHUNK_SCHEMA_VERSIONS:
         values["config_fingerprint"] = ""
     for key, value in values.items():
         connection.execute(

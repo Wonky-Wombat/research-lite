@@ -13,6 +13,7 @@ from collections.abc import Iterable, Sequence
 from typing import Literal, Protocol, cast
 
 from research_lite import Document
+from research_lite.chunk_kind import BODY, asks_for_citations
 from research_lite.defaults import DEFAULT_RERANKER_MODEL
 from research_lite.model_loading import model_cache_dir, silence_model_downloads, use_cuda
 from research_lite.vectorstore import LibraryIndex
@@ -122,6 +123,15 @@ class CrossEncoderReranker:
         return [document for document, _ in ranked]
 
 
+def _body_first(documents: Sequence[Document], *, k: int) -> list[Document]:
+    """Keep the best ``k`` chunks, preferring a document's own prose over its back matter."""
+    ranked = sorted(
+        enumerate(documents),
+        key=lambda item: (item[1].metadata.get("kind", BODY) != BODY, item[0]),
+    )
+    return [document for _, document in ranked[:k]]
+
+
 class HybridRetriever:
     """Retrieve dense and keyword candidates, then optionally rerank the fusion."""
 
@@ -138,6 +148,11 @@ class HybridRetriever:
         self._index = index
         self._rrf_constant = rrf_constant
         self._reranker = reranker
+
+    def _select(self, query: str, documents: Sequence[Document], *, k: int) -> list[Document]:
+        if asks_for_citations(query):
+            return list(documents[:k])
+        return _body_first(documents, k=k)
 
     def search(
         self,
@@ -158,7 +173,7 @@ class HybridRetriever:
         fetch_k = max(k, candidate_k)
         dense_results = self._index.similarity_search(query_vector, k=fetch_k)
         if mode == "dense":
-            return dense_results[:k]
+            return self._select(query, dense_results, k=k)
 
         lexical_results = self._index.keyword_search(query, k=fetch_k)
         fused_results = reciprocal_rank_fusion(
@@ -169,4 +184,4 @@ class HybridRetriever:
                 msg = "hybrid-rerank mode requires a configured cross-encoder reranker."
                 raise ValueError(msg)
             fused_results = self._reranker.rerank(query, fused_results)
-        return fused_results[:k]
+        return self._select(query, fused_results, k=k)
