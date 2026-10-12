@@ -15,6 +15,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -476,9 +477,11 @@ def _stored_schema_version(connection: sqlite3.Connection) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
-CHUNK_COLUMNS = ("source_path", "title", "source_unit", "chunk_id", "kind", "text")
+# The tables a rebuild recreates. Anything else has to go through a schema version bump,
+# because dropping these would not bring it up to date and the check would never settle.
+REBUILDABLE_TABLES = ("chunks", "vectors", "chunks_fts")
 
-CHUNK_TABLES = (
+DROP_REBUILDABLE_TABLES = (
     "DROP TRIGGER IF EXISTS chunks_fts_insert;"
     "DROP TRIGGER IF EXISTS chunks_fts_delete;"
     "DROP TABLE IF EXISTS chunks_fts;"
@@ -487,14 +490,30 @@ CHUNK_TABLES = (
 )
 
 
+@cache
+def expected_columns() -> dict[str, frozenset[str]]:
+    """Ask SQLite which columns ``SCHEMA`` defines, so no column list is maintained by hand."""
+    probe = sqlite3.connect(":memory:")
+    try:
+        probe.executescript(SCHEMA)
+        return {
+            table: frozenset(str(row[1]) for row in probe.execute(f"PRAGMA table_info({table})"))
+            for table in REBUILDABLE_TABLES
+        }
+    finally:
+        probe.close()
+
+
 def _rebuild_chunk_tables_if_outdated(connection: sqlite3.Connection) -> bool:
-    """Recreate the chunk tables when they lack a column, so one re-index can refill them."""
-    stored = {str(row["name"]) for row in connection.execute("PRAGMA table_info(chunks)")}
-    if not stored or stored.issuperset(CHUNK_COLUMNS):
-        return False
-    connection.executescript(CHUNK_TABLES)
-    connection.executescript(SCHEMA)
-    return True
+    """Recreate the chunk tables when they predate a column, so one re-index can refill them."""
+    for table, columns in expected_columns().items():
+        stored = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})")}
+        if stored.issuperset(columns):
+            continue
+        connection.executescript(DROP_REBUILDABLE_TABLES)
+        connection.executescript(SCHEMA)
+        return True
+    return False
 
 
 def _upgrade_schema(state_dir: Path, connection: sqlite3.Connection, version: str) -> None:
