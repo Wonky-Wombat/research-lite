@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 
 from research_lite import Document
 from research_lite.citations import citation_sources
@@ -24,9 +24,17 @@ from research_lite.query_session import (
 )
 
 HISTORY_ANSWER_CHARS = 500
+WAITING_NOTICE = "Generating..."
 
 AnswerGenerator = Callable[[str, Sequence[Document], Sequence[tuple[str, str]]], str | None]
+AnswerStreamer = Callable[[str, Sequence[Document], Sequence[tuple[str, str]]], Iterator[str]]
 Output = Callable[[str], None]
+Writer = Callable[[str], None]
+
+
+def _write_without_newline(text: str) -> None:
+    print(text, end="", flush=True)
+
 
 _HELP_TEXT = """Commands:
   /help       Show this help message.
@@ -173,13 +181,17 @@ class TerminalChat:
         query_session: LibraryQuerySession,
         *,
         generate_answer: AnswerGenerator | None,
+        stream_answer: AnswerStreamer | None = None,
         library_stats: LibraryStats | None = None,
         output: Output = print,
+        write: Writer = _write_without_newline,
     ) -> None:
         self._query_session = query_session
         self._generate_answer = generate_answer
+        self._stream_answer = stream_answer
         self._library_stats = library_stats
         self._output = output
+        self._write = write
         self._last_documents: list[Document] = []
         self._history: list[tuple[str, str]] = []
 
@@ -251,7 +263,9 @@ class TerminalChat:
             self._output("No results returned from retrieval.")
             return
 
-        if self._generate_answer is None:
+        if self._stream_answer is not None:
+            self._stream(question, outcome.documents)
+        elif self._generate_answer is None:
             self._output("Generation is disabled. Type /sources to inspect retrieved evidence.")
         else:
             try:
@@ -264,6 +278,39 @@ class TerminalChat:
                     self._remember(question, answer)
         self._output(f"\nSources:\n{_source_summary(outcome.documents)}")
         self._output("Type /sources for excerpts and full metadata.")
+
+    def _stream(self, question: str, documents: Sequence[Document]) -> None:
+        """Print the answer as the model produces it, so a slow model still shows progress."""
+        assert self._stream_answer is not None
+        self._output("\nAnswer:")
+        self._write(WAITING_NOTICE)
+        waiting = True
+        parts: list[str] = []
+        failure: str | None = None
+        try:
+            for delta in self._stream_answer(question, documents, self._history):
+                if waiting:
+                    self._clear_notice()
+                    waiting = False
+                parts.append(delta)
+                self._write(delta)
+        except Exception as exc:
+            failure = str(exc)
+        if waiting:
+            self._clear_notice()
+        elif parts:
+            self._write("\n")
+        if failure is not None:
+            self._output(f"Failed to generate answer: {failure}")
+            return
+        answer = "".join(parts).strip()
+        if answer:
+            self._remember(question, answer)
+        else:
+            self._output("No answer was generated.")
+
+    def _clear_notice(self) -> None:
+        self._write(f"\r{'':<{len(WAITING_NOTICE)}}\r")
 
     def _print_retrieval_notice(self, outcome: QueryOutcome) -> None:
         for warning in query_warnings(outcome):

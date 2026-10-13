@@ -636,6 +636,7 @@ def _run() -> None:
         TerminalChat(
             session,
             generate_answer=generator.generate_answer if generator else None,
+            stream_answer=generator.stream_answer if generator else None,
             library_stats=library_stats,
         ).run()
         return

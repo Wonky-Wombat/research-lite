@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -97,6 +97,62 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> di
         raise LLMRequestError(f"LLM service at {url} returned invalid JSON.") from exc
 
 
+def _post_lines(url: str, payload: dict[str, Any], headers: dict[str, str]) -> Iterator[bytes]:
+    request = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310
+            yield from response
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:300]
+        raise LLMRequestError(f"LLM request failed with HTTP {exc.code}: {detail}") from exc
+    except (URLError, TimeoutError) as exc:
+        raise LLMRequestError(f"Could not reach the LLM service at {url}.") from exc
+
+
+def _event(text: str, url: str) -> dict[str, Any]:
+    try:
+        payload: dict[str, Any] = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise LLMRequestError(f"LLM service at {url} returned invalid JSON.") from exc
+    if payload.get("error"):
+        raise LLMRequestError(f"LLM service reported an error: {payload['error']}")
+    return payload
+
+
+def _ollama_deltas(url: str, payload: dict[str, Any], headers: dict[str, str]) -> Iterator[str]:
+    """Yield the text of each message in Ollama's newline-delimited JSON stream."""
+    for line in _post_lines(url, payload, headers):
+        text = line.decode("utf-8", errors="replace").strip()
+        if not text:
+            continue
+        event = _event(text, url)
+        delta = (event.get("message") or {}).get("content")
+        if isinstance(delta, str) and delta:
+            yield delta
+        if event.get("done"):
+            return
+
+
+def _openai_deltas(url: str, payload: dict[str, Any], headers: dict[str, str]) -> Iterator[str]:
+    """Yield the text of each delta in an OpenAI-compatible server-sent event stream."""
+    for line in _post_lines(url, payload, headers):
+        text = line.decode("utf-8", errors="replace").strip()
+        if not text.startswith("data:"):
+            continue
+        data = text[len("data:") :].strip()
+        if data == "[DONE]":
+            return
+        choices = _event(data, url).get("choices") or [{}]
+        delta = (choices[0].get("delta") or {}).get("content")
+        if isinstance(delta, str) and delta:
+            yield delta
+
+
 def _supports_temperature(model_name: str) -> bool:
     model = model_name.lower()
     return not (model.startswith("gpt-5") and "chat" not in model)
@@ -131,13 +187,12 @@ class RAGGenerator:
             if api_key:
                 self._headers["Authorization"] = f"Bearer {api_key}"
 
-    def generate_answer(
+    def _messages(
         self,
         query: str,
         context_documents: Iterable[Document],
-        history: Sequence[tuple[str, str]] = (),
-    ) -> str | None:
-        """Generate an answer from the retrieved documents and any earlier turns."""
+        history: Sequence[tuple[str, str]],
+    ) -> list[dict[str, str]]:
         documents = list(context_documents)
         citation_numbers = citation_number_by_source(documents)
         context_items: list[str] = []
@@ -157,7 +212,16 @@ class RAGGenerator:
             messages.append({"role": "user", "content": past_question})
             messages.append({"role": "assistant", "content": past_answer})
         messages.append({"role": "user", "content": query})
+        return messages
 
+    def generate_answer(
+        self,
+        query: str,
+        context_documents: Iterable[Document],
+        history: Sequence[tuple[str, str]] = (),
+    ) -> str | None:
+        """Generate an answer from the retrieved documents and any earlier turns."""
+        messages = self._messages(query, context_documents, history)
         try:
             if self._provider == "ollama":
                 response = _post_json(
@@ -180,3 +244,27 @@ class RAGGenerator:
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMRequestError("LLM service returned an unexpected response.") from exc
         return content if isinstance(content, str) else None
+
+    def stream_answer(
+        self,
+        query: str,
+        context_documents: Iterable[Document],
+        history: Sequence[tuple[str, str]] = (),
+    ) -> Iterator[str]:
+        """Yield the answer in the pieces the service sends, so it can be shown as it arrives."""
+        messages = self._messages(query, context_documents, history)
+        if self._provider == "ollama":
+            return _ollama_deltas(
+                f"{self._base_url}/api/chat",
+                {
+                    "model": self._model,
+                    "messages": messages,
+                    "stream": True,
+                    "options": {"temperature": self._temperature},
+                },
+                self._headers,
+            )
+        payload: dict[str, Any] = {"model": self._model, "messages": messages, "stream": True}
+        if _supports_temperature(self._model):
+            payload["temperature"] = self._temperature
+        return _openai_deltas(f"{self._base_url}/chat/completions", payload, self._headers)
