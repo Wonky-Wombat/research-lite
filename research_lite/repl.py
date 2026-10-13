@@ -38,10 +38,123 @@ _HELP_TEXT = """Commands:
 Ask a question to search the loaded library. Follow-up questions use the recent turns to work
 out what they refer to; use /reset when you change topic."""
 
+GREETING = "greeting"
+ACKNOWLEDGEMENT = "acknowledgement"
+FAREWELL = "farewell"
+ABOUT = "about"
+
+_SMALLTALK_VOCABULARY: dict[str, str | None] = {
+    "hi": GREETING,
+    "hii": GREETING,
+    "hey": GREETING,
+    "heya": GREETING,
+    "hiya": GREETING,
+    "hello": GREETING,
+    "helo": GREETING,
+    "yo": GREETING,
+    "sup": GREETING,
+    "morning": GREETING,
+    "afternoon": GREETING,
+    "evening": GREETING,
+    "day": GREETING,
+    "thanks": ACKNOWLEDGEMENT,
+    "thank": ACKNOWLEDGEMENT,
+    "thx": ACKNOWLEDGEMENT,
+    "ty": ACKNOWLEDGEMENT,
+    "cheers": ACKNOWLEDGEMENT,
+    "ok": ACKNOWLEDGEMENT,
+    "okay": ACKNOWLEDGEMENT,
+    "cool": ACKNOWLEDGEMENT,
+    "nice": ACKNOWLEDGEMENT,
+    "great": ACKNOWLEDGEMENT,
+    "perfect": ACKNOWLEDGEMENT,
+    "awesome": ACKNOWLEDGEMENT,
+    "sure": ACKNOWLEDGEMENT,
+    "alright": ACKNOWLEDGEMENT,
+    "right": ACKNOWLEDGEMENT,
+    "yep": ACKNOWLEDGEMENT,
+    "yeah": ACKNOWLEDGEMENT,
+    "understood": ACKNOWLEDGEMENT,
+    "oops": ACKNOWLEDGEMENT,
+    "hm": ACKNOWLEDGEMENT,
+    "hmm": ACKNOWLEDGEMENT,
+    "i": ACKNOWLEDGEMENT,
+    "makes": ACKNOWLEDGEMENT,
+    "sense": ACKNOWLEDGEMENT,
+    "got": ACKNOWLEDGEMENT,
+    "no": ACKNOWLEDGEMENT,
+    "problem": ACKNOWLEDGEMENT,
+    "worries": ACKNOWLEDGEMENT,
+    "bye": FAREWELL,
+    "goodbye": FAREWELL,
+    "see": FAREWELL,
+    "ya": FAREWELL,
+    "later": FAREWELL,
+    "night": FAREWELL,
+    "good": None,
+    "there": None,
+    "you": None,
+    "very": None,
+    "much": None,
+    "so": None,
+    "a": None,
+    "lot": None,
+    "it": None,
+}
+
+_ABOUT_PHRASES = frozenset(
+    {
+        "who are you",
+        "what are you",
+        "what is this",
+        "what can you do",
+        "what do you do",
+    }
+)
+
+_SMALLTALK_REPLIES = {
+    GREETING: "Hello. Ask a question about the library, or type /help for commands.",
+    ACKNOWLEDGEMENT: "Ask another question whenever you are ready.",
+    FAREWELL: "Type /exit to leave the chat.",
+    ABOUT: (
+        "I answer questions using only the documents in this library, and cite the passages "
+        "I used. Type /library to see what is indexed."
+    ),
+}
+
+_SMALLTALK_WORDS = 4
+_PUNCTUATION = ".,!?;:~'\"-"
+_BARE_COMMANDS = {"exit": "/exit", "quit": "/exit", "help": "/help"}
+
 _COUNT_QUESTION = re.compile(
     r"\b(?:how many|number of|count)\b.*\b(?:papers?|documents?|pdfs?|files?)\b",
     re.IGNORECASE,
 )
+
+
+def smalltalk_category(question: str) -> str | None:
+    """Classify a greeting or an acknowledgement, which needs no search."""
+    words = [word.strip(_PUNCTUATION) for word in question.lower().split()]
+    words = [word for word in words if word]
+    if not words or len(words) > _SMALLTALK_WORDS:
+        return None
+    if " ".join(words) in _ABOUT_PHRASES:
+        return ABOUT
+    if any(word not in _SMALLTALK_VOCABULARY for word in words):
+        return None
+    categories = (_SMALLTALK_VOCABULARY[word] for word in words)
+    return next((category for category in categories if category), None)
+
+
+def smalltalk_reply(question: str) -> str | None:
+    """Answer a greeting or an acknowledgement without searching the library."""
+    category = smalltalk_category(question)
+    return None if category is None else _SMALLTALK_REPLIES[category]
+
+
+def bare_command(question: str) -> str | None:
+    """Map a command typed without its leading slash, such as `exit`, to the command."""
+    return _BARE_COMMANDS.get(question.lower().strip(_PUNCTUATION).strip())
 
 
 def _source_summary(documents: Sequence[Document]) -> str:
@@ -95,6 +208,7 @@ class TerminalChat:
 
             if not question:
                 continue
+            question = bare_command(question) or question
             if question in {"/exit", "/quit"}:
                 self._output("Goodbye.")
                 return
@@ -116,13 +230,21 @@ class TerminalChat:
                 self._output("Unknown command. Type /help for available commands.")
                 continue
 
-            if self._is_library_count_question(question):
+            reply = smalltalk_reply(question)
+            if reply is not None:
+                self._output(reply)
+            elif self._is_library_count_question(question):
                 self._show_library_count()
             else:
                 self._answer(question)
 
     def _answer(self, question: str) -> None:
-        outcome = self._query_session.query(question, self._history)
+        try:
+            outcome = self._query_session.query(question, self._history)
+        except Exception as exc:
+            self._output(f"Search failed: {exc}")
+            self._output("Leave the chat and start it again if the library was rebuilt meanwhile.")
+            return
         self._last_documents = outcome.documents
         self._print_retrieval_notice(outcome)
         if not outcome.documents:
