@@ -23,6 +23,7 @@ class LibraryStats:
     indexed_sources: int
     failed_sources: int
     chunks: int
+    titles: tuple[str, ...] = ()
 
     def display(self) -> str:
         """Return a short status line suitable for terminal output."""
@@ -37,8 +38,15 @@ def inspect_library(library_root: Path, index: LibraryIndex) -> LibraryStats:
         records = manifest.list_sources()
     finally:
         manifest.close()
+    documents = index.documents()
+    titles: dict[str, str] = {}
+    for document in documents:
+        source_path = str(document.metadata.get("source_path", ""))
+        if source_path and source_path not in titles:
+            titles[source_path] = str(document.metadata.get("title", "")) or Path(source_path).name
     return LibraryStats(
         indexed_sources=sum(record.has_indexed_content for record in records),
         failed_sources=sum(record.last_refresh_error is not None for record in records),
-        chunks=len(index.documents()),
+        chunks=len(documents),
+        titles=tuple(sorted(titles.values(), key=str.casefold)),
     )

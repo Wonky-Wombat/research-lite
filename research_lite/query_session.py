@@ -72,16 +72,23 @@ class LibraryQuerySession:
             reranker=reranker,
         )
 
-    def query(self, question: str, history: Sequence[tuple[str, str]] = ()) -> QueryOutcome:
+    def query(
+        self,
+        question: str,
+        history: Sequence[tuple[str, str]] = (),
+        *,
+        top_k: int | None = None,
+    ) -> QueryOutcome:
         """Retrieve evidence for a question, using earlier turns to resolve what it refers to."""
         retrieval_text = retrieval_query(question, history)
         query_vector = self._embedding_service.embed_query(retrieval_text)
+        k = self._top_k if top_k is None else max(1, top_k)
         try:
             documents, best_score = self._retriever.search_with_best_score(
                 retrieval_text,
                 query_vector,
                 mode=self._retrieval_mode,
-                k=self._top_k,
+                k=k,
                 candidate_k=self._candidate_k,
             )
         except RerankerUnavailableError:
@@ -91,7 +98,7 @@ class LibraryQuerySession:
                 retrieval_text,
                 query_vector,
                 mode="hybrid",
-                k=self._top_k,
+                k=k,
                 candidate_k=self._candidate_k,
             )
             return QueryOutcome(documents, retrieval_mode="hybrid", reranker_unavailable=True)
