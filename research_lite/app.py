@@ -241,11 +241,12 @@ def _print_libraries(registry: LibraryRegistry) -> None:
 def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
     """Resolve CLI overrides against non-secret, local-first user settings."""
     settings = load_llm_settings()
+    requested_model = args.llm_model
     requested_provider = args.llm_provider
     args.llm_provider = requested_provider or settings.provider
     uses_saved_provider = requested_provider is None or requested_provider == settings.provider
     if args.llm_model is None:
-        if uses_saved_provider:
+        if uses_saved_provider and settings.model_chosen:
             args.llm_model = settings.model
         elif args.llm_provider == "ollama":
             args.llm_model = DEFAULT_OLLAMA_MODEL
@@ -253,12 +254,18 @@ def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
             args.llm_model = DEFAULT_OPENAI_MODEL
     if args.llm_base_url is None and uses_saved_provider:
         args.llm_base_url = settings.base_url
+    if settings.superseded_model and requested_provider in {None, "ollama"}:
+        print(
+            f"Using {args.llm_model} for generation. The saved "
+            f"{settings.superseded_model!r} was an earlier default; pass --llm-model to pin one."
+        )
     if args.llm_provider != "ollama":
         return None
     return LLMSettings(
         provider=args.llm_provider,
         model=args.llm_model,
         base_url=args.llm_base_url or DEFAULT_OLLAMA_BASE_URL,
+        model_chosen=requested_model is not None,
     )
 
 

@@ -18,6 +18,8 @@ from research_lite.defaults import DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL
 
 DEFAULT_LLM_PROVIDER = "ollama"
 
+SUPERSEDED_OLLAMA_MODELS = frozenset({"llama3.2"})
+
 
 @dataclass(frozen=True)
 class LLMSettings:
@@ -26,6 +28,8 @@ class LLMSettings:
     provider: str = DEFAULT_LLM_PROVIDER
     model: str = DEFAULT_OLLAMA_MODEL
     base_url: str = DEFAULT_OLLAMA_BASE_URL
+    model_chosen: bool = False
+    superseded_model: str = ""
 
 
 def load_env_file(start: Path | None = None) -> None:
@@ -99,18 +103,23 @@ def load_llm_settings() -> LLMSettings:
     ):
         msg = f"Invalid LLM settings at '{path}'."
         raise RuntimeError(msg)
-    return LLMSettings(provider=provider, model=model, base_url=base_url)
+    superseded = provider == "ollama" and model in SUPERSEDED_OLLAMA_MODELS
+    return LLMSettings(
+        provider=provider,
+        model=DEFAULT_OLLAMA_MODEL if superseded else model,
+        base_url=base_url,
+        model_chosen="model" in llm and not superseded,
+        superseded_model=model if superseded else "",
+    )
 
 
 def save_llm_settings(settings: LLMSettings) -> Path:
     """Persist non-secret defaults so local startup needs no repeated flags."""
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    model_line = f'model = "{settings.model}"\n' if settings.model_chosen else ""
     path.write_text(
-        "[llm]\n"
-        f'provider = "{settings.provider}"\n'
-        f'model = "{settings.model}"\n'
-        f'base_url = "{settings.base_url}"\n',
+        f'[llm]\nprovider = "{settings.provider}"\n{model_line}base_url = "{settings.base_url}"\n',
         encoding="utf-8",
     )
     return path
