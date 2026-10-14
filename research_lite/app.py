@@ -257,7 +257,8 @@ def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
     if settings.superseded_model and requested_provider in {None, "ollama"}:
         print(
             f"Using {args.llm_model} for generation. The saved "
-            f"{settings.superseded_model!r} was an earlier default; pass --llm-model to pin one."
+            f"{settings.superseded_model!r} was an earlier default; pass --llm-model to pin one.",
+            file=sys.stderr,
         )
     if args.llm_provider != "ollama":
         return None
