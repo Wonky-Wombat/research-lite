@@ -124,13 +124,18 @@ class CrossEncoderReranker:
         )
 
 
-def _body_first(documents: Sequence[Document], *, k: int) -> list[Document]:
-    """Keep the best ``k`` chunks, preferring a document's own prose over its back matter."""
+def _body_first_indices(documents: Sequence[Document], *, k: int) -> list[int]:
+    """Positions of the best ``k`` chunks, preferring a document's own prose over back matter."""
     ranked = sorted(
         enumerate(documents),
         key=lambda item: (item[1].metadata.get("kind", BODY) != BODY, item[0]),
     )
-    return [document for _, document in ranked[:k]]
+    return [position for position, _ in ranked[:k]]
+
+
+def _body_first(documents: Sequence[Document], *, k: int) -> list[Document]:
+    """Keep the best ``k`` chunks, preferring a document's own prose over its back matter."""
+    return [documents[position] for position in _body_first_indices(documents, k=k)]
 
 
 class HybridRetriever:
@@ -150,10 +155,23 @@ class HybridRetriever:
         self._rrf_constant = rrf_constant
         self._reranker = reranker
 
-    def _select(self, query: str, documents: Sequence[Document], *, k: int) -> list[Document]:
+    def _select(
+        self,
+        query: str,
+        documents: Sequence[Document],
+        *,
+        k: int,
+        scores: Sequence[float] | None = None,
+    ) -> tuple[list[Document], list[float]]:
+        """Pick the chunks to return, keeping each one's relevance score beside it."""
         if asks_for_citations(query):
-            return list(documents[:k])
-        return _body_first(documents, k=k)
+            kept = list(range(min(k, len(documents))))
+        else:
+            kept = _body_first_indices(documents, k=k)
+        chosen = [documents[position] for position in kept]
+        if scores is None:
+            return chosen, []
+        return chosen, [scores[position] for position in kept]
 
     def search(
         self,
@@ -177,10 +195,10 @@ class HybridRetriever:
         mode: RetrievalMode = "dense",
         k: int = 4,
         candidate_k: int = 20,
-    ) -> tuple[list[Document], float | None]:
+    ) -> tuple[list[Document], float | None, list[float]]:
         """Retrieve top chunks and the best relevance score, when a reranker provides one."""
         if k < 1 or candidate_k < 1:
-            return [], None
+            return [], None, []
         if mode not in {"dense", "hybrid", "hybrid-rerank"}:
             msg = f"Unsupported retrieval mode: {mode}."
             raise ValueError(msg)
@@ -188,18 +206,20 @@ class HybridRetriever:
         fetch_k = max(k, candidate_k)
         dense_results = self._index.similarity_search(query_vector, k=fetch_k)
         if mode == "dense":
-            return self._select(query, dense_results, k=k), None
+            return (*self._select(query, dense_results, k=k)[:1], None, [])
 
         lexical_results = self._index.keyword_search(query, k=fetch_k)
         fused_results = reciprocal_rank_fusion(
             (dense_results, lexical_results), k=fetch_k, constant=self._rrf_constant
         )
-        best_score: float | None = None
-        if mode == "hybrid-rerank":
-            if self._reranker is None:
-                msg = "hybrid-rerank mode requires a configured cross-encoder reranker."
-                raise ValueError(msg)
-            scored = self._reranker.rerank(query, fused_results)
-            fused_results = [document for document, _ in scored]
-            best_score = scored[0][1] if scored else None
-        return self._select(query, fused_results, k=k), best_score
+        if mode != "hybrid-rerank":
+            return (*self._select(query, fused_results, k=k)[:1], None, [])
+        if self._reranker is None:
+            msg = "hybrid-rerank mode requires a configured cross-encoder reranker."
+            raise ValueError(msg)
+        scored = self._reranker.rerank(query, fused_results)
+        fused_results = [document for document, _ in scored]
+        ranked_scores = [score for _, score in scored]
+        best_score = ranked_scores[0] if ranked_scores else None
+        documents, kept_scores = self._select(query, fused_results, k=k, scores=ranked_scores)
+        return documents, best_score, kept_scores

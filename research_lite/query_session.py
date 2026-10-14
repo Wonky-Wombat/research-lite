@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from research_lite import Document
+from research_lite.chunk_kind import BODY
 from research_lite.citations import citation_number_by_source, page_label, page_number
 from research_lite.embedding import EmbeddingService
 from research_lite.retrieval import (
@@ -41,6 +42,7 @@ class QueryOutcome:
     retrieval_mode: RetrievalMode
     reranker_unavailable: bool = False
     best_score: float | None = None
+    scores: tuple[float, ...] = ()
 
     @property
     def weak_match(self) -> bool:
@@ -84,7 +86,7 @@ class LibraryQuerySession:
         query_vector = self._embedding_service.embed_query(retrieval_text)
         k = self._top_k if top_k is None else max(1, top_k)
         try:
-            documents, best_score = self._retriever.search_with_best_score(
+            documents, best_score, scores = self._retriever.search_with_best_score(
                 retrieval_text,
                 query_vector,
                 mode=self._retrieval_mode,
@@ -102,7 +104,12 @@ class LibraryQuerySession:
                 candidate_k=self._candidate_k,
             )
             return QueryOutcome(documents, retrieval_mode="hybrid", reranker_unavailable=True)
-        return QueryOutcome(documents, retrieval_mode=self._retrieval_mode, best_score=best_score)
+        return QueryOutcome(
+            documents,
+            retrieval_mode=self._retrieval_mode,
+            best_score=best_score,
+            scores=tuple(scores),
+        )
 
 
 def format_evidence(documents: Sequence[Document]) -> list[str]:
@@ -127,22 +134,33 @@ class SourceMatch:
     source_path: str
     passages: int
     best_page: int | None
+    score: float | None = None
 
 
-def matching_sources(outcome: QueryOutcome) -> list[SourceMatch]:
-    """Group retrieved chunks by file, keeping the order of their best passage."""
+def matching_sources(outcome: QueryOutcome, *, prose_only: bool = False) -> list[SourceMatch]:
+    """Group retrieved chunks by file, keeping the order of their best passage.
+
+    ``prose_only`` drops a document's back matter before grouping: a submission checklist or a
+    reference list that happens to match does not make its paper a document about the subject.
+    """
     order: list[str] = []
     titles: dict[str, str] = {}
     counts: Counter[str] = Counter()
     best_pages: dict[str, int | None] = {}
-    for document in outcome.documents:
+    best_scores: dict[str, float] = {}
+    scores = outcome.scores or (None,) * len(outcome.documents)
+    for document, score in zip(outcome.documents, scores, strict=False):
         metadata = document.metadata
+        if prose_only and metadata.get("kind", BODY) != BODY:
+            continue
         key = str(metadata.get("source_path", "")) or str(metadata.get("title", ""))
         if key not in titles:
             order.append(key)
             titles[key] = str(metadata.get("title", "Unknown"))
             best_pages[key] = page_number(metadata)
         counts[key] += 1
+        if score is not None and (key not in best_scores or score > best_scores[key]):
+            best_scores[key] = score
     return [
         SourceMatch(
             rank=rank,
@@ -150,9 +168,23 @@ def matching_sources(outcome: QueryOutcome) -> list[SourceMatch]:
             source_path=key,
             passages=counts[key],
             best_page=best_pages[key],
+            score=best_scores.get(key),
         )
         for rank, key in enumerate(order, start=1)
     ]
+
+
+def match_strength(score: float | None) -> str:
+    """Name a relevance score, using the bands measured on the arXiv corpus."""
+    if score is None:
+        return ""
+    if score >= 2.0:
+        return "strong"
+    if score >= -2.0:
+        return "moderate"
+    if score >= WEAK_MATCH_SCORE:
+        return "weak"
+    return "very weak"
 
 
 def format_sources(matches: Sequence[SourceMatch]) -> list[str]:
@@ -178,6 +210,8 @@ def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
                 "path": match.source_path,
                 "page": match.best_page,
                 "passages": match.passages,
+                "score": match.score,
+                "match": match_strength(match.score),
             }
             for match in matching_sources(outcome)
         ],
