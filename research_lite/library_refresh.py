@@ -28,7 +28,7 @@ from research_lite.preprocessing import SplitConfig, split_documents
 from research_lite.refresh_plan import RefreshPlan, plan_library_refresh
 from research_lite.utils.loader_utils import build_source_metadata
 
-TITLE_RULES = "1"
+TITLE_RULES = "2"
 
 
 @dataclass(frozen=True)

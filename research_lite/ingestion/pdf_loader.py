@@ -12,6 +12,7 @@ from pathlib import Path
 import pypdfium2 as pdfium
 
 from research_lite import Document
+from research_lite.pdf_title import page_title
 
 from ..utils.loader_utils import (
     build_source_metadata,
@@ -55,11 +56,18 @@ def pdf_title(path: Path) -> str:
 
 
 def _title(pdf: pdfium.PdfDocument, fallback: str) -> str:
+    """Resolve the title from metadata the first page confirms, else from the page's layout."""
     try:
-        title = pdf.get_metadata_dict().get("Title")
+        declared = pdf.get_metadata_dict().get("Title")
     except Exception:
-        title = None
-    return usable_title(title, fallback)
+        declared = None
+    if not len(pdf):
+        return usable_title(declared, fallback)
+    page = pdf[0]
+    try:
+        return page_title(page, declared, _page_text(pdf, 0), usable_title(declared, fallback))
+    except Exception:
+        return usable_title(declared, fallback)
 
 
 def _page_text(pdf: pdfium.PdfDocument, index: int) -> str:
