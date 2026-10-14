@@ -15,6 +15,7 @@ from collections.abc import Sequence
 BODY = "body"
 REFERENCES = "references"
 BOILERPLATE = "boilerplate"
+RUNNING_TEXT = "running_text"
 
 _HEADING = re.compile(
     r"^[ \t]*(?:\d+\.?[ \t]+|[IVX]+\.?[ \t]+)?"
@@ -105,6 +106,7 @@ __all__ = [
     "BODY",
     "BOILERPLATE",
     "REFERENCES",
+    "RUNNING_TEXT",
     "asks_for_citations",
     "classify_chunk",
     "reference_start_unit",

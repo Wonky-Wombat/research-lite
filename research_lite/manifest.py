@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 
     from research_lite import Document
     from research_lite.embedding import EmbeddedDocument
-    from research_lite.preprocessing import SplitConfig
+from research_lite.preprocessing import SplitConfig
+from research_lite.running_text import RUNNING_TEXT_RULES
 
 SCHEMA_VERSION = "5"
 FAISS_SCHEMA_VERSION = "2"
@@ -109,6 +110,7 @@ def config_fingerprint(*, model_name: str, split_config: SplitConfig) -> str:
     """Return a stable digest of settings that affect chunk vectors."""
     payload = {
         "embedding_model": model_name,
+        "running_text_rules": RUNNING_TEXT_RULES,
         "chunk_size": split_config.chunk_size,
         "chunk_overlap": split_config.chunk_overlap,
         "keep_separator": split_config.keep_separator,

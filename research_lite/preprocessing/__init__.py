@@ -12,7 +12,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from research_lite import Document
-from research_lite.chunk_kind import classify_chunk, reference_start_unit
+from research_lite.chunk_kind import RUNNING_TEXT, classify_chunk, reference_start_unit
+from research_lite.running_text import running_headers, strip_running_text
 
 from ..utils.loader_utils import _sha1
 
@@ -96,14 +97,62 @@ def _merge_pieces(pieces: list[str], separator: str, size: int, overlap: int) ->
     return [chunk for chunk in chunks if chunk]
 
 
-def _reference_starts(documents: list[Document]) -> dict[str, int]:
+def _pages_without_running_text(
+    documents: list[Document],
+) -> tuple[list[str], dict[str, tuple[int, list[str]]]]:
+    """Lift each document's running header out of its pages, and drop repeated page numbers."""
+    contents = [document.page_content for document in documents]
+    positions: dict[str, list[int]] = {}
+    for position, document in enumerate(documents):
+        if _unit_index(document) is not None:
+            source = str(document.metadata.get("source_path", ""))
+            positions.setdefault(source, []).append(position)
+    headers: dict[str, tuple[int, list[str]]] = {}
+    for source, pages in positions.items():
+        pages.sort(key=lambda position: _unit_index(documents[position]) or 0)
+        texts = [contents[position] for position in pages]
+        lines = running_headers(texts)
+        if lines:
+            headers[source] = (pages[0], lines)
+        for position, text in zip(pages, strip_running_text(texts), strict=True):
+            contents[position] = text
+    return contents, headers
+
+
+def _running_text_chunks(
+    documents: list[Document], headers: dict[str, tuple[int, list[str]]]
+) -> list[Document]:
+    """Keep each document's running headers as demoted chunks instead of discarding them."""
+    chunks: list[Document] = []
+    for position, lines in headers.values():
+        metadata = dict(documents[position].metadata)
+        source_id = metadata.get("source_id")
+        source_unit = metadata.get("source_unit", "unit-0")
+        for index, line in enumerate(lines):
+            prefix = source_id if source_id is not None else _sha1(line)
+            chunks.append(
+                Document(
+                    page_content=line,
+                    metadata={
+                        **metadata,
+                        "chunk_index": index,
+                        "num_chunks": len(lines),
+                        "chunk_id": f"{prefix}:{source_unit}:running-{index}",
+                        "kind": RUNNING_TEXT,
+                    },
+                )
+            )
+    return chunks
+
+
+def _reference_starts(documents: list[Document], contents: list[str]) -> dict[str, int]:
     """Find where each source's reference list starts, keeping unit order per source."""
     pages_by_source: dict[str, list[tuple[int, str]]] = {}
-    for document in documents:
+    for position, document in enumerate(documents):
         source = str(document.metadata.get("source_path", ""))
         unit = _unit_index(document)
         if unit is not None:
-            pages_by_source.setdefault(source, []).append((unit, document.page_content))
+            pages_by_source.setdefault(source, []).append((unit, contents[position]))
     starts: dict[str, int] = {}
     for source, pages in pages_by_source.items():
         ordered = [text for _, text in sorted(pages)]
@@ -133,12 +182,13 @@ def split_documents(
     if cfg.keep_separator:
         raise ValueError("keep_separator=True is not supported.")
     ordered = list(documents)
-    reference_starts = _reference_starts(ordered)
+    contents, headers = _pages_without_running_text(ordered)
+    reference_starts = _reference_starts(ordered, contents)
     chunked_docs: list[Document] = []
-    for document in ordered:
+    for position, document in enumerate(ordered):
         ext = str(document.metadata.get("ext", "") or "").lower()
         separators = _select_separators(ext, cfg)
-        cleaned_content = _normalize_text(document.page_content)
+        cleaned_content = _normalize_text(contents[position])
         splits = [
             Document(page_content=text, metadata=dict(document.metadata))
             for text in _split_text(cleaned_content, separators, cfg.chunk_size, cfg.chunk_overlap)
@@ -168,6 +218,7 @@ def split_documents(
             }
             chunk.metadata = metadata
             chunked_docs.append(chunk)
+    chunked_docs.extend(_running_text_chunks(ordered, headers))
     return chunked_docs
 
 
