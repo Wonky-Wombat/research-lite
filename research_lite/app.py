@@ -360,7 +360,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--llm-model",
-        help=("LLM model name. Defaults to the saved local setting, or llama3.2 on first launch."),
+        help="LLM model name. Defaults to the saved local setting, or qwen2.5:7b on first launch.",
     )
     parser.add_argument(
         "--llm-api-key",
