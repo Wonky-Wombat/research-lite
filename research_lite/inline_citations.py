@@ -25,9 +25,7 @@ _NAMES = (
 _ITEM = rf"{_NAMES}(?:\s+{_ET_AL})?(?:'s)?[\s,]*{_YEAR}"
 _LEAD = r"(?:(?:e\.g\.|i\.e\.|cf\.|see(?:\s+also)?|also|in)[,:]?\s*)?"
 
-_PARENTHETICAL = re.compile(
-    rf"\(\s*{_LEAD}{_ITEM}(?:\s*[;,]\s*{_LEAD}(?:{_ITEM}|{_YEAR}))*\s*\)"
-)
+_PARENTHETICAL = re.compile(rf"\(\s*{_LEAD}{_ITEM}(?:\s*[;,]\s*{_LEAD}(?:{_ITEM}|{_YEAR}))*\s*\)")
 _NARRATIVE = re.compile(
     rf"\b(?:{_SURNAME})"
     rf"(?:\s*(?:,\s*)?(?:{_JOIN})\s*(?:{_SURNAME}))?"
