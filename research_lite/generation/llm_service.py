@@ -32,6 +32,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "Each context item begins with a source citation like [1]. Cite factual claims using only "
     "these numbers, for example [1]. Do not write raw source labels, file paths, chunk IDs, "
     "or metadata.\n\n"
+    "Some context items will not bear on the question at all. Ignore those completely rather "
+    "than working them into the answer, and cite at most five sources.\n\n"
     "Context:\n{context}"
 )
 REQUEST_TIMEOUT_SECONDS = 120
