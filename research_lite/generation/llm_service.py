@@ -36,6 +36,29 @@ DEFAULT_SYSTEM_PROMPT = (
     "than working them into the answer, and cite at most five sources.\n\n"
     "Context:\n{context}"
 )
+TOOL_FACTS = (
+    "\n\nAbout this tool\n"
+    "You are ResearchLite, a local command-line tool that searches the user's own document "
+    "folders. A question about the tool itself is answered from here, never from the "
+    "documents.\n"
+    "- add a folder as a library: researchlite library add PATH --name NAME\n"
+    "- pick up new or changed files: researchlite library sync NAME\n"
+    "- open a library and chat with it: researchlite library use NAME\n"
+    "- list the registered libraries: researchlite library list\n"
+    "- in this chat: /library statistics, /sources the last question's evidence, /reset, "
+    "/help, /exit\n"
+    "- no publication dates, authors or venues are recorded, only each document's title and "
+    "text\n"
+    "- everything runs on this machine; no document is sent anywhere\n"
+    "If the tool cannot do what is asked, say so rather than naming another tool."
+)
+DOCUMENT_LIST = (
+    "\n\nThe documents these passages came from\n"
+    "{titles}\n"
+    "A question about what this library holds is answered from this list only. The passages "
+    "mention other people's work; those are not documents in this library, so never name one "
+    "in answer to such a question."
+)
 REQUEST_TIMEOUT_SECONDS = 120
 
 
@@ -204,12 +227,17 @@ class RAGGenerator:
             citation_number = citation_numbers.get(source_path or title, 0)
             location = page_label(document.metadata)
             context_items.append(f"[{citation_number}] {title}{location}\n{document.page_content}")
-        messages = [
-            {
-                "role": "system",
-                "content": DEFAULT_SYSTEM_PROMPT.format(context="\n\n".join(context_items)),
-            }
-        ]
+        titles = "\n".join(
+            f"- {title}"
+            for title in dict.fromkeys(
+                str(document.metadata.get("title", "")) for document in documents
+            )
+            if title
+        )
+        prompt = DEFAULT_SYSTEM_PROMPT.format(context="\n\n".join(context_items)) + TOOL_FACTS
+        if titles:
+            prompt += DOCUMENT_LIST.format(titles=titles)
+        messages = [{"role": "system", "content": prompt}]
         for past_question, past_answer in history:
             messages.append({"role": "user", "content": past_question})
             messages.append({"role": "assistant", "content": past_answer})
