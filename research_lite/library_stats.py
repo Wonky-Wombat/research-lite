@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,20 @@ class LibraryStats:
     failed_sources: int
     chunks: int
     titles: tuple[str, ...] = ()
+    containing: int | None = None
+
+    def overview(self, terms: Sequence[str] = ()) -> dict[str, object]:
+        """The whole-library view, as JSON-ready data rather than prose."""
+        return {
+            "documents": self.indexed_sources,
+            "chunks": self.chunks,
+            "failed": self.failed_sources,
+            "titles": list(self.titles),
+            "terms": list(terms),
+            "documents_containing_all_terms": self.containing,
+            "recorded": ["title", "text", "page"],
+            "not_recorded": ["publication date", "author", "venue"],
+        }
 
     def display(self) -> str:
         """Return a short status line suitable for terminal output."""
@@ -31,11 +46,14 @@ class LibraryStats:
         return f"Library: {self.indexed_sources} papers · {self.chunks} chunks{failure_suffix}."
 
 
-def inspect_library(library_root: Path, index: LibraryIndex) -> LibraryStats:
+def inspect_library(
+    library_root: Path, index: LibraryIndex, *, terms: Sequence[str] = ()
+) -> LibraryStats:
     """Read manifest counts and the loaded index's chunk count without writing state."""
     manifest = IngestionManifest.open(library_root)
     try:
         records = manifest.list_sources()
+        containing = manifest.documents_containing(terms) if terms else None
     finally:
         manifest.close()
     documents = index.documents()
@@ -49,4 +67,5 @@ def inspect_library(library_root: Path, index: LibraryIndex) -> LibraryStats:
         failed_sources=sum(record.last_refresh_error is not None for record in records),
         chunks=len(documents),
         titles=tuple(sorted(titles.values(), key=str.casefold)),
+        containing=containing,
     )

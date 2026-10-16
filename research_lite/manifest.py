@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
     from research_lite import Document
     from research_lite.embedding import EmbeddedDocument
+from research_lite.chunk_kind import BODY
 from research_lite.preprocessing import SplitConfig
 from research_lite.running_text import RUNNING_TEXT_RULES
 
@@ -363,6 +365,19 @@ class IngestionManifest:
     def chunk_count(self) -> int:
         """Return the number of stored chunks."""
         return int(self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+
+    def documents_containing(self, terms: Sequence[str]) -> int:
+        """Count the documents whose body text holds every one of these words."""
+        wanted = [term for term in (t.strip().lower() for t in terms) if term]
+        if not wanted:
+            return 0
+        match = " AND ".join(f'"{term}"' for term in dict.fromkeys(wanted))
+        row = self._connection.execute(
+            "SELECT COUNT(DISTINCT source_path) FROM chunks WHERE kind = ? AND id IN "
+            "(SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?)",
+            (BODY, match),
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     def keyword_search(self, query: str, *, k: int) -> list[int]:
         """Return ids of up to ``k`` chunks ranked by FTS5 BM25."""

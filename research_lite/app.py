@@ -13,6 +13,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import json
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -185,6 +186,30 @@ def _refresh_library(
     finally:
         _clear_progress()
     _print_refresh_result(result)
+
+
+def _print_overview(library_root: Path, args: argparse.Namespace) -> None:
+    """Describe the whole library, which retrieval cannot do from a handful of passages."""
+    from research_lite.library_stats import inspect_library
+    from research_lite.vectorstore import LibraryIndex
+
+    terms = re.findall(r"\w+", str(args.overview).lower())
+    stats = inspect_library(library_root, LibraryIndex.load(library_root), terms=terms)
+    overview = stats.overview(terms)
+    if args.json:
+        print(json.dumps(overview, ensure_ascii=False))
+        return
+    print(f"{overview['documents']} documents, {overview['chunks']} chunks")
+    if overview["failed"]:
+        print(f"{overview['failed']} failed to index")
+    if terms:
+        print(
+            f"{overview['documents_containing_all_terms']} documents contain all of: "
+            f"{' '.join(terms)}"
+        )
+    print("not recorded: publication date, author, venue")
+    for title in stats.titles:
+        print(f"  {title}")
 
 
 def _print_context(
@@ -382,6 +407,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Print the passage with this chunk_id together with its neighbours.",
     )
     parser.add_argument(
+        "--overview",
+        nargs="?",
+        const="",
+        metavar="WORDS",
+        help=(
+            "Describe the whole library rather than searching it: how many documents and "
+            "chunks it holds, every title, and which fields are not recorded. Given words, "
+            "also count the documents whose text holds all of them. Loads no model."
+        ),
+    )
+    parser.add_argument(
         "--context-radius",
         type=int,
         default=1,
@@ -438,8 +474,8 @@ def _run() -> None:
     args = parser.parse_args()
     if args.command == "library" and args.library_command is None:
         parser.error("`researchlite library` requires a command.")
-    if args.json and not (args.query or args.context):
-        parser.error("--json requires --query or --context.")
+    if args.json and not (args.query or args.context or args.overview is not None):
+        parser.error("--json requires --query, --context or --overview.")
     if args.files and not args.query:
         parser.error("--files requires --query.")
     if args.context and (args.query or args.chat):
@@ -574,6 +610,9 @@ def _run() -> None:
             f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
             "Run `researchlite library sync` to create and synchronize it."
         )
+    if args.overview is not None:
+        _print_overview(library_root, args)
+        return
     if args.context:
         _print_context(parser, library_root, args)
         return
