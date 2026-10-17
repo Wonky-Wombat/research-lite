@@ -244,14 +244,7 @@ class RAGGenerator:
         messages.append({"role": "user", "content": query})
         return messages
 
-    def generate_answer(
-        self,
-        query: str,
-        context_documents: Iterable[Document],
-        history: Sequence[tuple[str, str]] = (),
-    ) -> str | None:
-        """Generate an answer from the retrieved documents and any earlier turns."""
-        messages = self._messages(query, context_documents, history)
+    def _complete(self, messages: list[dict[str, str]]) -> str | None:
         try:
             if self._provider == "ollama":
                 response = _post_json(
@@ -274,6 +267,15 @@ class RAGGenerator:
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMRequestError("LLM service returned an unexpected response.") from exc
         return content if isinstance(content, str) else None
+
+    def generate_answer(
+        self,
+        query: str,
+        context_documents: Iterable[Document],
+        history: Sequence[tuple[str, str]] = (),
+    ) -> str | None:
+        """Generate an answer from the retrieved documents and any earlier turns."""
+        return self._complete(self._messages(query, context_documents, history))
 
     def stream_answer(
         self,
