@@ -9,8 +9,7 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from research_lite import Document
 from research_lite.citations import citation_sources
@@ -27,6 +26,9 @@ HISTORY_ANSWER_CHARS = 500
 WAITING_NOTICE = "Generating..."
 
 AnswerGenerator = Callable[[str, Sequence[Document], Sequence[tuple[str, str]]], str | None]
+ModeChooser = Callable[[str], tuple[str, tuple[str, ...]]]
+OverviewReader = Callable[[Sequence[str]], Mapping[str, object]]
+OverviewAnswerer = Callable[[str, Mapping[str, object]], str | None]
 AnswerStreamer = Callable[[str, Sequence[Document], Sequence[tuple[str, str]]], Iterator[str]]
 Output = Callable[[str], None]
 Writer = Callable[[str], None]
@@ -134,11 +136,6 @@ _SMALLTALK_WORDS = 4
 _PUNCTUATION = ".,!?;:~'\"-"
 _BARE_COMMANDS = {"exit": "/exit", "quit": "/exit", "help": "/help"}
 
-_COUNT_QUESTION = re.compile(
-    r"\b(?:how many|number of|count)\b.*\b(?:papers?|documents?|pdfs?|files?)\b",
-    re.IGNORECASE,
-)
-
 
 def smalltalk_category(question: str) -> str | None:
     """Classify a greeting or an acknowledgement, which needs no search."""
@@ -183,6 +180,9 @@ class TerminalChat:
         generate_answer: AnswerGenerator | None,
         stream_answer: AnswerStreamer | None = None,
         library_stats: LibraryStats | None = None,
+        choose_mode: ModeChooser | None = None,
+        read_overview: OverviewReader | None = None,
+        answer_overview: OverviewAnswerer | None = None,
         output: Output = print,
         write: Writer = _write_without_newline,
     ) -> None:
@@ -190,6 +190,9 @@ class TerminalChat:
         self._generate_answer = generate_answer
         self._stream_answer = stream_answer
         self._library_stats = library_stats
+        self._choose_mode = choose_mode
+        self._read_overview = read_overview
+        self._answer_overview = answer_overview
         self._output = output
         self._write = write
         self._last_documents: list[Document] = []
@@ -245,10 +248,38 @@ class TerminalChat:
             reply = smalltalk_reply(question)
             if reply is not None:
                 self._output(reply)
-            elif self._is_library_count_question(question):
-                self._show_library_count()
-            else:
+            elif not self._route_to_overview(question):
                 self._answer(question)
+
+    def _route_to_overview(self, question: str) -> bool:
+        """Answer a whole-library question from counted facts, or report that we did not.
+
+        Retrieval returns the best few passages and cannot say how many documents a word
+        appears in, so a question about the collection has to be answered from the manifest
+        instead. Anything the chooser does not recognise falls through to retrieval.
+        """
+        if self._choose_mode is None or self._read_overview is None:
+            return False
+        if self._answer_overview is None:
+            return False
+        try:
+            mode, terms = self._choose_mode(question)
+        except Exception:
+            return False
+        if mode != "overview":
+            return False
+        try:
+            overview = self._read_overview(terms)
+            answer = self._answer_overview(question, overview)
+        except Exception as exc:
+            self._output(f"Library overview failed: {exc}")
+            return True
+        if not answer:
+            return False
+        self._last_documents = []
+        self._output(answer.strip())
+        self._remember(question, answer.strip())
+        return True
 
     def _answer(self, question: str) -> None:
         try:
@@ -334,16 +365,3 @@ class TerminalChat:
             self._output("Library statistics are unavailable for this session.")
             return
         self._output(self._library_stats.display())
-
-    def _show_library_count(self) -> None:
-        if self._library_stats is None:
-            self._output("I cannot determine the library-wide paper count in this session.")
-            return
-        self._output(
-            f"This library contains {self._library_stats.indexed_sources} indexed papers "
-            f"and {self._library_stats.chunks} chunks."
-        )
-
-    @staticmethod
-    def _is_library_count_question(question: str) -> bool:
-        return bool(_COUNT_QUESTION.search(question))

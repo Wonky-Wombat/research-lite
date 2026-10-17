@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator, Sequence
+import re
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -59,6 +60,63 @@ DOCUMENT_LIST = (
     "mention other people's work; those are not documents in this library, so never name one "
     "in answer to such a question."
 )
+CHOOSE_MODE = """A tool searches one folder of research papers. It can do two things.
+
+PASSAGES  find the passages that answer a question about what the papers say
+OVERVIEW  describe the folder as a whole: how many documents it holds, which titles, how many \
+contain a given word, and which fields it does not record at all
+
+Reply with one line and nothing else, in one of these two shapes:
+
+  PASSAGES
+  OVERVIEW: the subject words to count, or - when none
+
+Examples:
+  Message: what is agentic pressure
+  PASSAGES
+  Message: what dataset does Better Call Reward use
+  PASSAGES
+  Message: how many papers do i have on deep learning
+  OVERVIEW: deep learning
+  Message: which papers are about computer vision
+  OVERVIEW: computer vision
+  Message: how many papers are there in total
+  OVERVIEW: -
+  Message: what is the newest paper in the collection
+  OVERVIEW: -
+  Message: how do i add a folder
+  OVERVIEW: -
+
+A message asking what a paper says, reports, uses or proposes needs PASSAGES, even when it \
+mentions a number. A message asking how many documents, which documents exist, when one was \
+published, or how to use the tool needs OVERVIEW.
+
+Message: {question}"""
+
+OVERVIEW_ANSWER = """You are ResearchLite, a tool that searches one folder of research papers.
+
+The reader asked about the folder itself, so below is what the folder records, taken by \
+counting rather than by reading passages. Answer from it alone.
+
+- A count here is exact. Say it plainly.
+- `not_recorded` lists what the folder does not hold at all. If the question needs one of \
+those, say it is not recorded and stop; do not estimate it.
+- `documents_containing_all_terms` counts documents whose text holds every one of `terms`. \
+Containing a word is not the same as being about the subject, so say which it is.
+- Keep it to two or three sentences. No lists unless the question asks which documents.
+
+{overview}
+{tool_facts}"""
+
+_TERM = re.compile(r"[a-z0-9][a-z0-9-]*")
+_TERM_STOP = frozenset(
+    """the a an of in on for to and or with that this these those is are was were be been
+    it its their they them we our you your which who what when where how why not no than
+    then there do does did can could may might must will would have has had as by from at
+    about into within concerning regarding related relating using involving mentioning
+    papers paper documents document pdfs pdf files file library collection folder""".split()
+)
+
 REQUEST_TIMEOUT_SECONDS = 120
 
 
@@ -234,7 +292,7 @@ class RAGGenerator:
             )
             if title
         )
-        prompt = DEFAULT_SYSTEM_PROMPT.format(context="\n\n".join(context_items)) + TOOL_FACTS
+        prompt = DEFAULT_SYSTEM_PROMPT.format(context="\n\n".join(context_items))
         if titles:
             prompt += DOCUMENT_LIST.format(titles=titles)
         messages = [{"role": "system", "content": prompt}]
@@ -244,16 +302,19 @@ class RAGGenerator:
         messages.append({"role": "user", "content": query})
         return messages
 
-    def _complete(self, messages: list[dict[str, str]]) -> str | None:
+    def _complete(self, messages: list[dict[str, str]], *, limit: int | None = None) -> str | None:
         try:
             if self._provider == "ollama":
+                options: dict[str, Any] = {"temperature": self._temperature}
+                if limit is not None:
+                    options["num_predict"] = limit
                 response = _post_json(
                     f"{self._base_url}/api/chat",
                     {
                         "model": self._model,
                         "messages": messages,
                         "stream": False,
-                        "options": {"temperature": self._temperature},
+                        "options": options,
                     },
                     self._headers,
                 )
@@ -262,11 +323,45 @@ class RAGGenerator:
                 payload: dict[str, Any] = {"model": self._model, "messages": messages}
                 if _supports_temperature(self._model):
                     payload["temperature"] = self._temperature
+                if limit is not None:
+                    payload["max_tokens"] = limit
                 response = _post_json(f"{self._base_url}/chat/completions", payload, self._headers)
                 content = response["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMRequestError("LLM service returned an unexpected response.") from exc
         return content if isinstance(content, str) else None
+
+    def choose_mode(self, question: str) -> tuple[str, tuple[str, ...]]:
+        """Pick retrieval or the whole-library overview, and the words the overview counts.
+
+        Retrieval is the fallback for anything unparsed: a whole-library question answered
+        from passages is wrong but recoverable, while a content question answered from the
+        overview reaches the model with no passages in it at all.
+        """
+        try:
+            reply = self._complete(
+                [{"role": "user", "content": CHOOSE_MODE.format(question=question)}], limit=24
+            )
+        except LLMRequestError:
+            return "passages", ()
+        head = (reply or "").strip()
+        if not head.upper().startswith("OVERVIEW"):
+            return "passages", ()
+        rest = head[len("OVERVIEW") :].strip(" :\n\t.")
+        words = tuple(dict.fromkeys(w for w in _TERM.findall(rest.lower()) if w not in _TERM_STOP))
+        return "overview", words
+
+    def answer_overview(self, question: str, overview: Mapping[str, object]) -> str | None:
+        """Answer from counted library facts rather than from retrieved passages."""
+        prompt = OVERVIEW_ANSWER.format(
+            overview=json.dumps(overview, ensure_ascii=False, indent=1), tool_facts=TOOL_FACTS
+        )
+        return self._complete(
+            [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": question},
+            ]
+        )
 
     def generate_answer(
         self,

@@ -685,6 +685,11 @@ def _run() -> None:
             generate_answer=generator.generate_answer if generator else None,
             stream_answer=generator.stream_answer if generator else None,
             library_stats=library_stats,
+            choose_mode=generator.choose_mode if generator else None,
+            read_overview=lambda terms: inspect_library(library_root, index, terms=terms).overview(
+                terms
+            ),
+            answer_overview=generator.answer_overview if generator else None,
         ).run()
         return
 
