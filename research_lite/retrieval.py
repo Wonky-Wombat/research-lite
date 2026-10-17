@@ -133,11 +133,6 @@ def _body_first_indices(documents: Sequence[Document], *, k: int) -> list[int]:
     return [position for position, _ in ranked[:k]]
 
 
-def _body_first(documents: Sequence[Document], *, k: int) -> list[Document]:
-    """Keep the best ``k`` chunks, preferring a document's own prose over its back matter."""
-    return [documents[position] for position in _body_first_indices(documents, k=k)]
-
-
 class HybridRetriever:
     """Retrieve dense and keyword candidates, then optionally rerank the fusion."""
 
