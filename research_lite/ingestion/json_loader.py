@@ -5,6 +5,9 @@
 # Created by Wonky-Wombat on 2026-09-22.
 #
 
+
+from __future__ import annotations
+
 import json
 
 from research_lite import Document

@@ -5,6 +5,9 @@
 # Created by Wonky-Wombat on 2026-09-22.
 #
 
+
+from __future__ import annotations
+
 import hashlib
 import os
 from collections.abc import Iterable
