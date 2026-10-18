@@ -366,18 +366,27 @@ class IngestionManifest:
         """Return the number of stored chunks."""
         return int(self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
 
-    def documents_containing(self, terms: Sequence[str]) -> int:
-        """Count the documents whose body text holds every one of these words."""
+    def sources_containing(self, terms: Sequence[str]) -> list[str]:
+        """The documents whose body text holds every one of these words.
+
+        Naming them rather than counting them is what a question like "which papers are
+        about computer vision" needs; a count alongside every title in the library leaves
+        the caller to guess which ones matched.
+        """
         wanted = [term for term in (t.strip().lower() for t in terms) if term]
         if not wanted:
-            return 0
+            return []
         match = " AND ".join(f'"{term}"' for term in dict.fromkeys(wanted))
-        row = self._connection.execute(
-            "SELECT COUNT(DISTINCT source_path) FROM chunks WHERE kind = ? AND id IN "
-            "(SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?)",
+        rows = self._connection.execute(
+            "SELECT DISTINCT source_path FROM chunks WHERE kind = ? AND id IN "
+            "(SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?) ORDER BY source_path",
             (BODY, match),
-        ).fetchone()
-        return int(row[0]) if row else 0
+        ).fetchall()
+        return [str(row["source_path"]) for row in rows]
+
+    def documents_containing(self, terms: Sequence[str]) -> int:
+        """Count the documents whose body text holds every one of these words."""
+        return len(self.sources_containing(terms))
 
     def keyword_search(self, query: str, *, k: int) -> list[int]:
         """Return ids of up to ``k`` chunks ranked by FTS5 BM25."""

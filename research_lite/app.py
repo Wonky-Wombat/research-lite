@@ -214,7 +214,7 @@ def _print_overview(library_root: Path, args: argparse.Namespace) -> None:
 
     terms = re.findall(r"\w+", str(args.overview).lower())
     stats = inspect_library(library_root, LibraryIndex.load(library_root), terms=terms)
-    overview = stats.overview(terms)
+    overview = stats.overview(terms, titles=True)
     if args.json:
         print(json.dumps(overview, ensure_ascii=False))
         return

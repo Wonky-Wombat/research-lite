@@ -25,20 +25,36 @@ class LibraryStats:
     failed_sources: int
     chunks: int
     titles: tuple[str, ...] = ()
-    containing: int | None = None
+    matching: tuple[str, ...] | None = None
 
-    def overview(self, terms: Sequence[str] = ()) -> dict[str, object]:
-        """The whole-library view, as JSON-ready data rather than prose."""
-        return {
+    @property
+    def containing(self) -> int | None:
+        return None if self.matching is None else len(self.matching)
+
+    def overview(self, terms: Sequence[str] = (), *, titles: bool = False) -> dict[str, object]:
+        """The whole-library view, as JSON-ready data rather than prose.
+
+        The title list is the bulk of this payload — 1,929 of 2,013 tokens for a hundred
+        documents — so it is sent only when it answers the question. Given terms, the
+        titles that match are what "which papers are about X" needs; without them, naming
+        every document in the library is a cost with no question behind it.
+        """
+        view: dict[str, object] = {
             "documents": self.indexed_sources,
             "chunks": self.chunks,
             "failed": self.failed_sources,
-            "titles": list(self.titles),
             "terms": list(terms),
             "documents_containing_all_terms": self.containing,
             "recorded": ["title", "text", "page"],
             "not_recorded": ["publication date", "author", "venue"],
         }
+        if self.matching is not None:
+            view["matching_titles"] = list(self.matching)
+        elif titles:
+            view["titles"] = list(self.titles)
+        else:
+            view["titles_available"] = len(self.titles)
+        return view
 
     def display(self) -> str:
         """Return a short status line suitable for terminal output."""
@@ -53,7 +69,7 @@ def inspect_library(
     manifest = IngestionManifest.open(library_root)
     try:
         records = manifest.list_sources()
-        containing = manifest.documents_containing(terms) if terms else None
+        matched = manifest.sources_containing(terms) if terms else None
     finally:
         manifest.close()
     documents = index.documents()
@@ -67,5 +83,11 @@ def inspect_library(
         failed_sources=sum(record.last_refresh_error is not None for record in records),
         chunks=len(documents),
         titles=tuple(sorted(titles.values(), key=str.casefold)),
-        containing=containing,
+        matching=(
+            None
+            if matched is None
+            else tuple(
+                sorted((titles.get(path, Path(path).name) for path in matched), key=str.casefold)
+            )
+        ),
     )

@@ -95,7 +95,9 @@ class Tools:
     def overview(self, arguments: Mapping[str, Any]) -> Reply:
         words = str(arguments.get("terms", "") or "")
         terms = TERMS.findall(words.lower())
-        payload = inspect_library(self.root, self._library(), terms=terms).overview(terms)
+        payload = inspect_library(self.root, self._library(), terms=terms).overview(
+            terms, titles=bool(arguments.get("titles"))
+        )
         return _summarise(payload), payload
 
     def read_context(self, arguments: Mapping[str, Any]) -> Reply:
@@ -217,10 +219,19 @@ def definitions() -> list[dict[str, Any]]:
                     "terms": {
                         "type": "string",
                         "description": (
-                            "Subject words to count documents for, such as 'deep learning'. "
-                            "Leave out to describe the library as a whole."
+                            "Subject words, such as 'deep learning'. Returns how many "
+                            "documents hold all of them and which ones they are. Leave "
+                            "out to describe the library as a whole."
                         ),
-                    }
+                    },
+                    "titles": {
+                        "type": "boolean",
+                        "description": (
+                            "List every title in the library. Costs roughly 20 tokens per "
+                            "document, so ask only when the question is what the library "
+                            "holds in full. Ignored when terms are given."
+                        ),
+                    },
                 },
             },
         },
