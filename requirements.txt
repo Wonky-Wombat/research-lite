@@ -1,9 +1,13 @@
-filelock
-numpy
-prompt_toolkit
-pypdfium2
-docx2txt
-fastembed
-python-calamine
-beautifulsoup4
-markdownify
+# fastembed decides the stored embedding vectors. It is not pinned, so an upgrade can change
+# them; research_lite.embedding_probe detects that against a probe vector recorded at index
+# time and asks for a rebuild, which a version bound could only guess at.
+fastembed>=0.9.0
+
+beautifulsoup4~=4.15
+docx2txt~=0.9
+filelock~=4.0
+markdownify~=1.2
+numpy~=2.5
+prompt_toolkit~=3.0
+pypdfium2~=5.14
+python-calamine~=0.8
