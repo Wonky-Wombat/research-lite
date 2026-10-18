@@ -1,6 +1,4 @@
 -r requirements.txt
-ruff
-mypy
+ruff==0.16.10
+mypy==2.4.0
 pytest
-types-requests
-types-PyYAML
