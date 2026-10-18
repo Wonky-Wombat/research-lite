@@ -29,6 +29,14 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 UNSUPPORTED_VERSION = -32022
 
+# tools/list and server/discover are cacheable, and a client may reject a result that
+# leaves these out: Claude Code validates them as required, though the spec presents them
+# in examples rather than in prose. The tool list holds no library content, only the
+# definitions, which are the same for every caller.
+DISCOVER_TTL_MS = 3_600_000
+TOOLS_TTL_MS = 300_000
+CACHE_SCOPE = "public"
+
 # JSON-RPC allows a string, a number or null; a notification carries none at all
 RequestId = str | int | float | None
 
@@ -79,6 +87,8 @@ class Server:
             "resultType": "complete",
             "supportedVersions": list(SUPPORTED),
             "capabilities": {"tools": {}},
+            "ttlMs": DISCOVER_TTL_MS,
+            "cacheScope": CACHE_SCOPE,
             "_meta": {META_SERVER_INFO: self._info()},
             "instructions": (
                 "Searches one folder of the user's own documents. `search` returns a few "
@@ -134,7 +144,13 @@ class Server:
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": self._complete({"tools": list(self.tools["definitions"])}),
+                "result": self._complete(
+                    {
+                        "tools": list(self.tools["definitions"]),
+                        "ttlMs": TOOLS_TTL_MS,
+                        "cacheScope": CACHE_SCOPE,
+                    }
+                ),
             }
         if method == "tools/call":
             return self._call(request_id, params)
