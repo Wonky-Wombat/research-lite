@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from research_lite import embedding_probe
 from research_lite.embedding import EmbeddedDocument, EmbeddingService
 from research_lite.ingestion import (
     PDF_READER,
@@ -215,6 +216,10 @@ def _apply_refresh_plan(
                 )
             manifest.set_state_value("config_fingerprint", current_config_fingerprint)
         manifest.set_state_value("pdf_reader", PDF_READER)
+        manifest.set_state_value(
+            embedding_probe.STATE_KEY,
+            embedding_probe.encode(embedding_service.embed_query(embedding_probe.PROBE_TEXT)),
+        )
         return result
     finally:
         manifest.close()

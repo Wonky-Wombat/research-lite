@@ -20,6 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from research_lite import embedding_probe
 from research_lite.defaults import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
@@ -632,6 +633,15 @@ def _run() -> None:
             print(f"Loaded ResearchLite library index from '{library_root}'.")
     except (FileNotFoundError, RuntimeError) as exc:
         parser.error(str(exc))
+
+    manifest = IngestionManifest.open(library_root)
+    try:
+        recorded_probe = manifest.state_value(embedding_probe.STATE_KEY)
+    finally:
+        manifest.close()
+    notice = embedding_probe.drift_warning(recorded_probe, service)
+    if notice:
+        print(notice, file=sys.stderr)
 
     retrieval_mode: RetrievalMode = args.retrieval_mode
     reranker = (
