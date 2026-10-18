@@ -42,6 +42,34 @@ researchlite --context CHUNK_ID --context-radius 1                 # a passage i
 how many documents it holds, which titles, and how many contain a given set of words. The
 counts are exact, taken by SQL over the manifest, and no model is loaded.
 
+## From Claude Code, Codex or another MCP host
+
+```bash
+claude mcp add researchlite -- researchlite mcp ~/papers
+```
+
+The host's own model writes the answer; this serves it the passages. Six tools: `search`,
+`overview`, `read_context`, `status`, `sync_start` and `sync_status`. There is deliberately
+no tool that returns a whole document — a host that can ask for one will, and the point is
+to keep papers out of its context.
+
+Measured against the same host answering the same questions by opening the files itself,
+across a library of 100 papers:
+
+| | with these tools | reading the files |
+|---|---|---|
+| tokens | **170k** | 523k |
+| context per turn | **8.5k** (24 turns before a 200k window fills) | 22.3k (9 turns) |
+| wall clock | **28s** | 62s |
+| right answer | **12 of 12** | 10 of 12 |
+
+The saving is in not knowing which paper holds the answer. Told which file to read, a host
+is slightly better off reading it.
+
+Speaks the current protocol revision and the older `initialize` handshake, over stdin and
+stdout, with no protocol library: the official SDK's sixteen required dependencies exist
+mostly for an HTTP transport a local server never opens.
+
 ## What it does differently
 
 **References and page furniture are demoted.** Every chunk is classified as body text,
