@@ -199,11 +199,15 @@ def _version() -> str:
         return "0.0.0+source"
 
 
-def _serve_mcp(parser: argparse.ArgumentParser) -> None:
-    """Serve the active library over stdio until the host closes the stream."""
+def _serve_mcp(parser: argparse.ArgumentParser, library: str | None) -> None:
+    """Serve one library over stdio until the host closes the stream."""
     from research_lite import mcp_protocol, mcp_tools
 
-    root = _require_active_library(parser, load_library_registry())
+    root = (
+        resolve_library_root(library)
+        if library
+        else _require_active_library(parser, load_library_registry())
+    )
     mcp_protocol.main_stream(mcp_protocol.Server("researchlite", _version(), mcp_tools.build(root)))
 
 
@@ -456,13 +460,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Skip LLM generation and show retrieved evidence only.",
     )
     commands = parser.add_subparsers(dest="command", metavar="command")
-    commands.add_parser(
+    mcp_command = commands.add_parser(
         "mcp",
-        help="Serve the active library to an MCP host over stdin and stdout.",
+        help="Serve a library to an MCP host over stdin and stdout.",
         description=(
             "Expose retrieval to an MCP host such as Claude Code or Codex. The host's own "
             "model writes the answer; this serves search, overview and the library's state. "
             "Speaks JSON-RPC on stdin and stdout, so nothing else may be printed there."
+        ),
+    )
+    mcp_command.add_argument(
+        "library",
+        nargs="?",
+        help=(
+            "The library to serve. Defaults to the active one, but a host's configuration "
+            "is steadier naming the path than depending on which library is selected."
         ),
     )
     library = commands.add_parser("library", help="Manage local libraries.")
@@ -503,7 +515,7 @@ def _run() -> None:
     if args.command == "library" and args.library_command is None:
         parser.error("`researchlite library` requires a command.")
     if args.command == "mcp":
-        _serve_mcp(parser)
+        _serve_mcp(parser, args.library)
         return
     if args.json and not (args.query or args.context or args.overview is not None):
         parser.error("--json requires --query, --context or --overview.")
