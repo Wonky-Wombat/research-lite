@@ -189,6 +189,24 @@ def _refresh_library(
     _print_refresh_result(result)
 
 
+def _version() -> str:
+    """The installed version, or a placeholder when running from a checkout."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("researchlite")
+    except PackageNotFoundError:
+        return "0.0.0+source"
+
+
+def _serve_mcp(parser: argparse.ArgumentParser) -> None:
+    """Serve the active library over stdio until the host closes the stream."""
+    from research_lite import mcp_protocol, mcp_tools
+
+    root = _require_active_library(parser, load_library_registry())
+    mcp_protocol.main_stream(mcp_protocol.Server("researchlite", _version(), mcp_tools.build(root)))
+
+
 def _print_overview(library_root: Path, args: argparse.Namespace) -> None:
     """Describe the whole library, which retrieval cannot do from a handful of passages."""
     from research_lite.library_stats import inspect_library
@@ -438,6 +456,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Skip LLM generation and show retrieved evidence only.",
     )
     commands = parser.add_subparsers(dest="command", metavar="command")
+    commands.add_parser(
+        "mcp",
+        help="Serve the active library to an MCP host over stdin and stdout.",
+        description=(
+            "Expose retrieval to an MCP host such as Claude Code or Codex. The host's own "
+            "model writes the answer; this serves search, overview and the library's state. "
+            "Speaks JSON-RPC on stdin and stdout, so nothing else may be printed there."
+        ),
+    )
     library = commands.add_parser("library", help="Manage local libraries.")
     library_actions = library.add_subparsers(dest="library_command", metavar="command")
     add = library_actions.add_parser("add", help="Import a document directory and open it.")
@@ -475,6 +502,9 @@ def _run() -> None:
     args = parser.parse_args()
     if args.command == "library" and args.library_command is None:
         parser.error("`researchlite library` requires a command.")
+    if args.command == "mcp":
+        _serve_mcp(parser)
+        return
     if args.json and not (args.query or args.context or args.overview is not None):
         parser.error("--json requires --query, --context or --overview.")
     if args.files and not args.query:
