@@ -49,6 +49,111 @@ class QueryOutcome:
         """Whether the best passage scored too low to be worth trusting."""
         return self.best_score is not None and self.best_score < WEAK_MATCH_SCORE
 
+    def matching_sources(self, *, prose_only: bool = False) -> list[SourceMatch]:
+        """Group retrieved chunks by file, keeping the order of their best passage.
+
+        ``prose_only`` drops a document's back matter before grouping: a submission checklist or a
+        reference list that happens to match does not make its paper a document about the subject.
+        """
+        order: list[str] = []
+        titles: dict[str, str] = {}
+        counts: Counter[str] = Counter()
+        best_pages: dict[str, int | None] = {}
+        best_scores: dict[str, float] = {}
+        scores = self.scores or (None,) * len(self.documents)
+        for document, score in zip(self.documents, scores, strict=False):
+            metadata = document.metadata
+            if prose_only and metadata.get("kind", BODY) != BODY:
+                continue
+            key = str(metadata.get("source_path", "")) or str(metadata.get("title", ""))
+            if key not in titles:
+                order.append(key)
+                titles[key] = str(metadata.get("title", "Unknown"))
+                best_pages[key] = page_number(metadata)
+            counts[key] += 1
+            if score is not None and (key not in best_scores or score > best_scores[key]):
+                best_scores[key] = score
+        return [
+            SourceMatch(
+                rank=rank,
+                title=titles[key],
+                source_path=key,
+                passages=counts[key],
+                best_page=best_pages[key],
+                score=best_scores.get(key),
+            )
+            for rank, key in enumerate(order, start=1)
+        ]
+
+    def warnings(self) -> list[str]:
+        """Return the notices a caller should repeat to the user."""
+        warnings = []
+        if self.reranker_unavailable:
+            warnings.append("Reranker unavailable; used hybrid retrieval.")
+        if self.weak_match:
+            warnings.append(
+                "No strongly relevant passage was found; the library may not cover this."
+            )
+        return warnings
+
+    def as_evidence_lines(self) -> list[str]:
+        """Human-readable evidence lines for terminal output."""
+        numbers = citation_number_by_source(self.documents)
+        lines: list[str] = []
+        for document in self.documents:
+            preview = document.page_content[:240].replace("\n", " ")
+            source_path = str(document.metadata.get("source_path", ""))
+            title = document.metadata.get("title", "Unknown")
+            number = numbers.get(source_path or str(title), 0)
+            lines.append(f"[{number}] {title}{page_label(document.metadata)}\n  {preview}")
+        return lines
+
+    def as_evidence_json(self, question: str) -> dict[str, object]:
+        """The retrieved passages with their text, for a caller that parses."""
+        numbers = citation_number_by_source(self.documents)
+        results = []
+        for rank, document in enumerate(self.documents, start=1):
+            metadata = document.metadata
+            source_path = str(metadata.get("source_path", ""))
+            title = str(metadata.get("title", "Unknown"))
+            results.append(
+                {
+                    "rank": rank,
+                    "citation": numbers.get(source_path or title, 0),
+                    "title": title,
+                    "path": source_path,
+                    "page": page_number(metadata),
+                    "chunk_id": metadata.get("chunk_id"),
+                    "text": document.page_content,
+                }
+            )
+        return {
+            "query": question,
+            "retrieval_mode": self.retrieval_mode,
+            "warnings": self.warnings(),
+            "results": results,
+        }
+
+    def as_sources_json(self, question: str) -> dict[str, object]:
+        """The matching files without their text, for listing rather than reading."""
+        return {
+            "query": question,
+            "retrieval_mode": self.retrieval_mode,
+            "warnings": self.warnings(),
+            "files": [
+                {
+                    "rank": match.rank,
+                    "title": match.title,
+                    "path": match.source_path,
+                    "page": match.best_page,
+                    "passages": match.passages,
+                    "score": match.score,
+                    "match": match_strength(match.score),
+                }
+                for match in self.matching_sources()
+            ],
+        }
+
 
 class LibraryQuerySession:
     """Search a loaded library without modifying its manifest."""
@@ -112,19 +217,6 @@ class LibraryQuerySession:
         )
 
 
-def format_evidence(documents: Sequence[Document]) -> list[str]:
-    """Return human-readable evidence lines for terminal output."""
-    citation_numbers = citation_number_by_source(documents)
-    output: list[str] = []
-    for document in documents:
-        preview = document.page_content[:240].replace("\n", " ")
-        source_path = str(document.metadata.get("source_path", ""))
-        title = document.metadata.get("title", "Unknown")
-        citation_number = citation_numbers.get(source_path or str(title), 0)
-        output.append(f"[{citation_number}] {title}{page_label(document.metadata)}\n  {preview}")
-    return output
-
-
 @dataclass(frozen=True)
 class SourceMatch:
     """One library file that matched a query, with how strongly it matched."""
@@ -135,43 +227,6 @@ class SourceMatch:
     passages: int
     best_page: int | None
     score: float | None = None
-
-
-def matching_sources(outcome: QueryOutcome, *, prose_only: bool = False) -> list[SourceMatch]:
-    """Group retrieved chunks by file, keeping the order of their best passage.
-
-    ``prose_only`` drops a document's back matter before grouping: a submission checklist or a
-    reference list that happens to match does not make its paper a document about the subject.
-    """
-    order: list[str] = []
-    titles: dict[str, str] = {}
-    counts: Counter[str] = Counter()
-    best_pages: dict[str, int | None] = {}
-    best_scores: dict[str, float] = {}
-    scores = outcome.scores or (None,) * len(outcome.documents)
-    for document, score in zip(outcome.documents, scores, strict=False):
-        metadata = document.metadata
-        if prose_only and metadata.get("kind", BODY) != BODY:
-            continue
-        key = str(metadata.get("source_path", "")) or str(metadata.get("title", ""))
-        if key not in titles:
-            order.append(key)
-            titles[key] = str(metadata.get("title", "Unknown"))
-            best_pages[key] = page_number(metadata)
-        counts[key] += 1
-        if score is not None and (key not in best_scores or score > best_scores[key]):
-            best_scores[key] = score
-    return [
-        SourceMatch(
-            rank=rank,
-            title=titles[key],
-            source_path=key,
-            passages=counts[key],
-            best_page=best_pages[key],
-            score=best_scores.get(key),
-        )
-        for rank, key in enumerate(order, start=1)
-    ]
 
 
 def match_strength(score: float | None) -> str:
@@ -197,43 +252,12 @@ def format_sources(matches: Sequence[SourceMatch]) -> list[str]:
     return lines
 
 
-def sources_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
-    """Return the matching files for a query as JSON."""
-    return {
-        "query": question,
-        "retrieval_mode": outcome.retrieval_mode,
-        "warnings": query_warnings(outcome),
-        "files": [
-            {
-                "rank": match.rank,
-                "title": match.title,
-                "path": match.source_path,
-                "page": match.best_page,
-                "passages": match.passages,
-                "score": match.score,
-                "match": match_strength(match.score),
-            }
-            for match in matching_sources(outcome)
-        ],
-    }
-
-
 def retrieval_query(question: str, history: Sequence[tuple[str, str]] = ()) -> str:
     """Prefix a follow-up with recent questions so pronouns still retrieve the right passages."""
     if not history:
         return question
     earlier = [past_question for past_question, _ in history[-RETRIEVAL_HISTORY_TURNS:]]
     return " ".join([*earlier, question])
-
-
-def query_warnings(outcome: QueryOutcome) -> list[str]:
-    """Return the notices a caller should repeat to the user."""
-    warnings = []
-    if outcome.reranker_unavailable:
-        warnings.append("Reranker unavailable; used hybrid retrieval.")
-    if outcome.weak_match:
-        warnings.append("No strongly relevant passage was found; the library may not cover this.")
-    return warnings
 
 
 def format_context(chunk_id: str, documents: Sequence[Document]) -> list[str]:
@@ -262,30 +286,4 @@ def context_json(chunk_id: str, documents: Sequence[Document]) -> dict[str, obje
             }
             for document in documents
         ],
-    }
-
-
-def evidence_json(question: str, outcome: QueryOutcome) -> dict[str, object]:
-    citation_numbers = citation_number_by_source(outcome.documents)
-    results = []
-    for rank, document in enumerate(outcome.documents, start=1):
-        metadata = document.metadata
-        source_path = str(metadata.get("source_path", ""))
-        title = str(metadata.get("title", "Unknown"))
-        results.append(
-            {
-                "rank": rank,
-                "citation": citation_numbers.get(source_path or title, 0),
-                "title": title,
-                "path": source_path,
-                "page": page_number(metadata),
-                "chunk_id": metadata.get("chunk_id"),
-                "text": document.page_content,
-            }
-        )
-    return {
-        "query": question,
-        "retrieval_mode": outcome.retrieval_mode,
-        "warnings": query_warnings(outcome),
-        "results": results,
     }

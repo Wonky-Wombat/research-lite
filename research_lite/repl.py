@@ -18,8 +18,6 @@ from research_lite.query_session import (
     HISTORY_TURNS,
     LibraryQuerySession,
     QueryOutcome,
-    format_evidence,
-    query_warnings,
 )
 
 HISTORY_ANSWER_CHARS = 500
@@ -195,7 +193,7 @@ class TerminalChat:
         self._answer_overview = answer_overview
         self._output = output
         self._write = write
-        self._last_documents: list[Document] = []
+        self._last_outcome: QueryOutcome | None = None
         self._history: list[tuple[str, str]] = []
 
     def run(self) -> None:
@@ -238,7 +236,7 @@ class TerminalChat:
                 continue
             if question == "/reset":
                 self._history.clear()
-                self._last_documents = []
+                self._last_outcome = None
                 self._output("Conversation cleared.")
                 continue
             if question.startswith("/"):
@@ -276,7 +274,7 @@ class TerminalChat:
             return True
         if not answer:
             return False
-        self._last_documents = []
+        self._last_outcome = None
         self._output(answer.strip())
         self._remember(question, answer.strip())
         return True
@@ -288,7 +286,7 @@ class TerminalChat:
             self._output(f"Search failed: {exc}")
             self._output("Leave the chat and start it again if the library was rebuilt meanwhile.")
             return
-        self._last_documents = outcome.documents
+        self._last_outcome = outcome
         self._print_retrieval_notice(outcome)
         if not outcome.documents:
             self._output("No results returned from retrieval.")
@@ -344,7 +342,7 @@ class TerminalChat:
         self._write(f"\r{'':<{len(WAITING_NOTICE)}}\r")
 
     def _print_retrieval_notice(self, outcome: QueryOutcome) -> None:
-        for warning in query_warnings(outcome):
+        for warning in outcome.warnings():
             self._output(warning)
 
     def _remember(self, question: str, answer: str) -> None:
@@ -353,11 +351,11 @@ class TerminalChat:
         del self._history[:-HISTORY_TURNS]
 
     def _show_sources(self) -> None:
-        if not self._last_documents:
+        if self._last_outcome is None:
             self._output("No sources yet. Ask a question first.")
             return
         self._output("\nRetrieved evidence:")
-        for evidence in format_evidence(self._last_documents):
+        for evidence in self._last_outcome.as_evidence_lines():
             self._output(evidence)
 
     def _show_library(self) -> None:

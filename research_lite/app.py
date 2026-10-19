@@ -546,12 +546,7 @@ def _run() -> None:
     from research_lite.preprocessing import SplitConfig
     from research_lite.query_session import (
         LibraryQuerySession,
-        evidence_json,
-        format_evidence,
         format_sources,
-        matching_sources,
-        query_warnings,
-        sources_json,
     )
     from research_lite.retrieval import CrossEncoderReranker, RerankerUnavailableError
     from research_lite.utils.loader_utils import discover_files
@@ -748,9 +743,9 @@ def _run() -> None:
     if args.files:
         outcome = session.query(args.query)
         if args.json:
-            print(json.dumps(sources_json(args.query, outcome), ensure_ascii=False))
+            print(json.dumps(outcome.as_sources_json(args.query), ensure_ascii=False))
             return
-        matches = matching_sources(outcome)
+        matches = outcome.matching_sources()
         if not matches:
             print("No matching files found.")
             return
@@ -760,19 +755,20 @@ def _run() -> None:
         return
 
     if args.json:
-        print(json.dumps(evidence_json(args.query, session.query(args.query)), ensure_ascii=False))
+        payload = session.query(args.query).as_evidence_json(args.query)
+        print(json.dumps(payload, ensure_ascii=False))
         return
 
     print(f"Running {retrieval_mode} search for query: {args.query!r}")
     outcome = session.query(args.query)
     results = outcome.documents
-    for warning in query_warnings(outcome):
+    for warning in outcome.warnings():
         print(warning)
     if not results:
         print("No results returned from retrieval.")
     else:
         print(f"Found {len(results)} relevant evidence chunks:")
-        for evidence in format_evidence(results):
+        for evidence in outcome.as_evidence_lines():
             print(evidence)
 
         if not args.no_generation:

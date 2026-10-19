@@ -17,7 +17,7 @@ from research_lite.defaults import DEFAULT_EMBEDDING_MODEL
 from research_lite.library_stats import inspect_library
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
 from research_lite.preprocessing import SplitConfig
-from research_lite.query_session import LibraryQuerySession, context_json, evidence_json
+from research_lite.query_session import LibraryQuerySession, context_json
 from research_lite.retrieval import RetrievalMode
 
 if TYPE_CHECKING:
@@ -89,7 +89,7 @@ class Tools:
         mode: RetrievalMode = asked  # type: ignore[assignment]
         top_k = int(arguments.get("top_k", 4))
         outcome = self._session(mode).query(query, top_k=max(1, min(top_k, 12)))
-        payload = evidence_json(query, outcome)
+        payload = outcome.as_evidence_json(query)
         return _summarise(payload), payload
 
     def overview(self, arguments: Mapping[str, Any]) -> Reply:
