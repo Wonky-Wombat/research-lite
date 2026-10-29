@@ -44,7 +44,7 @@ def _default_separators_by_ext() -> dict[str, tuple[str, ...]]:
     }
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SplitConfig:
     chunk_size: int = 800
     chunk_overlap: int = 200

@@ -30,7 +30,7 @@ DONE = "done"
 FAILED = "failed"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class JobState:
     """What a caller polling a refresh is told."""
 

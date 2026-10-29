@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 WEAK_MATCH_SCORE = -5.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class QueryOutcome:
     """Documents returned from a query and the retrieval mode actually used."""
 
@@ -208,7 +208,7 @@ class LibraryQuerySession:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceMatch:
     """One library file that matched a query, with how strongly it matched."""
 

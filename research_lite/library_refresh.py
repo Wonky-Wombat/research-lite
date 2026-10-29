@@ -32,7 +32,7 @@ from research_lite.utils.loader_utils import build_source_metadata
 TITLE_RULES = "2"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RefreshProgress:
     """How far a refresh has got, reported before each source is indexed."""
 
@@ -43,7 +43,7 @@ class RefreshProgress:
     total_bytes: int
 
 
-@dataclass
+@dataclass(slots=True)
 class RefreshResult:
     """The outcome of applying a library refresh plan."""
 

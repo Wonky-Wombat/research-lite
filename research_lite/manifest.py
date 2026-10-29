@@ -90,7 +90,7 @@ END;
 """
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceRecord:
     """The manifest's file-level record for one library source."""
 

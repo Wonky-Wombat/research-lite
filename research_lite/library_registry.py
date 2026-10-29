@@ -24,14 +24,14 @@ from research_lite.settings import settings_path
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LibraryRecord:
     name: str
     path: Path
     last_synced_at: datetime | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LibraryRegistry:
     active_name: str | None = None
     libraries: tuple[LibraryRecord, ...] = ()

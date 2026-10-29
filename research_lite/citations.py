@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from research_lite import Document
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CitationSource:
     """One source paper and the number used to cite it in a response."""
 

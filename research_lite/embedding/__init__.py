@@ -20,7 +20,7 @@ class Embeddings(Protocol):
     def embed_query(self, text: str) -> list[float]: ...
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class EmbeddedDocument:
     """Pair a document with its embedding vector."""
 
@@ -28,7 +28,7 @@ class EmbeddedDocument:
     vector: list[float]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class EmbeddingConfig:
     """Configuration for batching behaviour of the embedding service."""
 

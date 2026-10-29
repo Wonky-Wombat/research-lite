@@ -17,7 +17,7 @@ from research_lite.manifest import IngestionManifest
 from research_lite.vectorstore import LibraryIndex
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class LibraryStats:
     """Counts that describe the current state of a local document library."""
 

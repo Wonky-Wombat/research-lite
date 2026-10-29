@@ -43,7 +43,7 @@ _LOADER_BY_EXT: dict[str, Callable[[str], list[Document]]] = {
 SUPPORTED_EXTENSIONS = tuple(_LOADER_BY_EXT)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IngestFailure:
     """A source that could not be loaded without stopping the full ingest."""
 
@@ -51,7 +51,7 @@ class IngestFailure:
     reason: str
 
 
-@dataclass
+@dataclass(slots=True)
 class IngestReport:
     """Summary of a document-loading operation."""
 

@@ -18,7 +18,7 @@ from research_lite.manifest import IngestionManifest
 from research_lite.utils.loader_utils import build_source_metadata, discover_files
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RefreshFailure:
     """A source that could not be inspected while planning a refresh."""
 
@@ -26,7 +26,7 @@ class RefreshFailure:
     reason: str
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RefreshPlan:
     """The file-level changes required to synchronize a document library."""
 

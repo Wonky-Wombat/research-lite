@@ -20,7 +20,7 @@ READY_MARKER = "ready"
 COMPLETED_MARKER = "completed"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RefreshBackup:
     """A pre-refresh snapshot that can restore an interrupted local refresh."""
 

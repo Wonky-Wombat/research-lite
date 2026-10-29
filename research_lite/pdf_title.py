@@ -44,7 +44,7 @@ _INLINE_NUMBER = re.compile(r"(?<=[A-Za-z])\s+\d{1,3}\s+(?=[A-Za-z])")
 _LEADING_NUMBER = re.compile(r"^\d{1,3}\s+(?=[A-Za-z])")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Run:
     text: str
     size: float
