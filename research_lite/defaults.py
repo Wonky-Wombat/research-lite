@@ -10,7 +10,3 @@ from __future__ import annotations
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
-DEFAULT_OPENAI_MODEL = "gpt-5-mini"
-DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
-DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"

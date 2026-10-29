@@ -30,8 +30,6 @@ if TYPE_CHECKING:
 
 
 WEAK_MATCH_SCORE = -5.0
-HISTORY_TURNS = 3
-RETRIEVAL_HISTORY_TURNS = 1
 
 
 @dataclass(frozen=True)
@@ -179,20 +177,13 @@ class LibraryQuerySession:
             reranker=reranker,
         )
 
-    def query(
-        self,
-        question: str,
-        history: Sequence[tuple[str, str]] = (),
-        *,
-        top_k: int | None = None,
-    ) -> QueryOutcome:
-        """Retrieve evidence for a question, using earlier turns to resolve what it refers to."""
-        retrieval_text = retrieval_query(question, history)
-        query_vector = self._embedding_service.embed_query(retrieval_text)
+    def query(self, question: str, *, top_k: int | None = None) -> QueryOutcome:
+        """Retrieve evidence for a question."""
+        query_vector = self._embedding_service.embed_query(question)
         k = self._top_k if top_k is None else max(1, top_k)
         try:
             documents, best_score, scores = self._retriever.search_with_best_score(
-                retrieval_text,
+                question,
                 query_vector,
                 mode=self._retrieval_mode,
                 k=k,
@@ -202,7 +193,7 @@ class LibraryQuerySession:
             if self._retrieval_mode != "hybrid-rerank":
                 raise
             documents = self._retriever.search(
-                retrieval_text,
+                question,
                 query_vector,
                 mode="hybrid",
                 k=k,
@@ -250,14 +241,6 @@ def format_sources(matches: Sequence[SourceMatch]) -> list[str]:
         plural = "" if match.passages == 1 else "s"
         lines.append(f"[{match.rank}] {match.title}{page}  ({match.passages} passage{plural})")
     return lines
-
-
-def retrieval_query(question: str, history: Sequence[tuple[str, str]] = ()) -> str:
-    """Prefix a follow-up with recent questions so pronouns still retrieve the right passages."""
-    if not history:
-        return question
-    earlier = [past_question for past_question, _ in history[-RETRIEVAL_HISTORY_TURNS:]]
-    return " ".join([*earlier, question])
 
 
 def format_context(chunk_id: str, documents: Sequence[Document]) -> list[str]:

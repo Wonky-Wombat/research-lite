@@ -8,6 +8,5 @@ docx2txt~=0.9
 filelock~=4.0
 markdownify~=1.2
 numpy~=2.5
-prompt_toolkit~=3.0
 pypdfium2~=5.14
 python-calamine~=0.8

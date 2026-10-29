@@ -21,13 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from research_lite import embedding_probe
-from research_lite.defaults import (
-    DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_OLLAMA_BASE_URL,
-    DEFAULT_OLLAMA_MODEL,
-    DEFAULT_OPENAI_MODEL,
-    DEFAULT_RERANKER_MODEL,
-)
+from research_lite.defaults import DEFAULT_EMBEDDING_MODEL, DEFAULT_RERANKER_MODEL
 from research_lite.library_registry import (
     LibraryRegistry,
     load_library_registry,
@@ -36,19 +30,12 @@ from research_lite.library_registry import (
     select_library,
 )
 from research_lite.manifest import IngestionManifest, config_fingerprint, resolve_library_root
-from research_lite.settings import (
-    LLMSettings,
-    load_env_file,
-    load_llm_settings,
-    save_llm_settings,
-)
 
 PROGRESS_WIDTH = 72
 FILES_MODE_CHUNKS = 40
 
 if TYPE_CHECKING:
     from research_lite.embedding import EmbeddingService
-    from research_lite.generation import RAGGenerator
     from research_lite.library_refresh import RefreshProgress, RefreshResult
     from research_lite.preprocessing import SplitConfig
     from research_lite.retrieval import RetrievalMode
@@ -286,45 +273,14 @@ def _print_libraries(registry: LibraryRegistry) -> None:
         print(f"{marker} {library.name}  {library.path}")
 
 
-def _apply_llm_defaults(args: argparse.Namespace) -> LLMSettings | None:
-    """Resolve CLI overrides against non-secret, local-first user settings."""
-    settings = load_llm_settings()
-    requested_model = args.llm_model
-    requested_provider = args.llm_provider
-    args.llm_provider = requested_provider or settings.provider
-    uses_saved_provider = requested_provider is None or requested_provider == settings.provider
-    if args.llm_model is None:
-        if uses_saved_provider and settings.model_chosen:
-            args.llm_model = settings.model
-        elif args.llm_provider == "ollama":
-            args.llm_model = DEFAULT_OLLAMA_MODEL
-        else:
-            args.llm_model = DEFAULT_OPENAI_MODEL
-    if args.llm_base_url is None and uses_saved_provider:
-        args.llm_base_url = settings.base_url
-    if settings.superseded_model and requested_provider in {None, "ollama"}:
-        print(
-            f"Using {args.llm_model} for generation. The saved "
-            f"{settings.superseded_model!r} was an earlier default; pass --llm-model to pin one.",
-            file=sys.stderr,
-        )
-    if args.llm_provider != "ollama":
-        return None
-    return LLMSettings(
-        provider=args.llm_provider,
-        model=args.llm_model,
-        base_url=args.llm_base_url or DEFAULT_OLLAMA_BASE_URL,
-        model_chosen=requested_model is not None,
-    )
-
-
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the ResearchLite RAG pipeline locally.",
+        description="Search a local document library and return the passages that match.",
         epilog=(
             "Examples:\n"
-            "  researchlite                                  Open the default library.\n"
-            "  researchlite library add ~/papers --name work  Import and open a library.\n"
+            "  researchlite                                  Describe the default library.\n"
+            '  researchlite --query "ablation results"        Search the default library.\n'
+            "  researchlite library add ~/papers --name work  Import a library.\n"
             "  researchlite library use work                  Switch libraries.\n"
             "  researchlite library sync                      Sync the active library.\n"
             "  researchlite library list                      List local libraries.\n"
@@ -348,15 +304,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--chunk-overlap", type=int, default=200)
-    query_mode = parser.add_mutually_exclusive_group()
-    query_mode.add_argument(
+    parser.add_argument(
         "--query",
         help="Search text against an existing .researchlite library.",
-    )
-    query_mode.add_argument(
-        "--chat",
-        action="store_true",
-        help="Start an interactive terminal chat against an existing .researchlite library.",
     )
     parser.add_argument(
         "--top-k",
@@ -401,28 +351,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=16,
         help="Batch size used by the optional cross-encoder reranker.",
     )
-    # LLM Generation arguments
-    parser.add_argument(
-        "--llm-provider",
-        choices=("openai", "ollama"),
-        help="LLM backend. Defaults to the saved local setting, or Ollama on first launch.",
-    )
-    parser.add_argument(
-        "--llm-model",
-        help="LLM model name. Defaults to the saved local setting, or qwen2.5:7b on first launch.",
-    )
-    parser.add_argument(
-        "--llm-api-key",
-        help="API key for an OpenAI-compatible service. Can also be set via OPENAI_API_KEY.",
-    )
-    parser.add_argument(
-        "--llm-base-url",
-        help=("Base URL for the LLM service. Defaults to the saved local setting."),
-    )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="With --query, print retrieved evidence as JSON and skip LLM generation.",
+        help="With --query, --context or --overview, print the result as JSON.",
     )
     parser.add_argument(
         "--context",
@@ -454,11 +386,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             f"searching the top {FILES_MODE_CHUNKS} chunks."
         ),
     )
-    parser.add_argument(
-        "--no-generation",
-        action="store_true",
-        help="Skip LLM generation and show retrieved evidence only.",
-    )
     commands = parser.add_subparsers(dest="command", metavar="command")
     mcp_command = commands.add_parser(
         "mcp",
@@ -479,10 +406,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     library = commands.add_parser("library", help="Manage local libraries.")
     library_actions = library.add_subparsers(dest="library_command", metavar="command")
-    add = library_actions.add_parser("add", help="Import a document directory and open it.")
+    add = library_actions.add_parser("add", help="Import and index a document directory.")
     add.add_argument("library_path", help="Document directory to import.")
     add.add_argument("--name", required=True, help="Local library name.")
-    use = library_actions.add_parser("use", help="Open a registered library.")
+    use = library_actions.add_parser("use", help="Make a registered library the default.")
     use.add_argument("library_name", help="Registered library name.")
     sync = library_actions.add_parser("sync", help="Synchronize a registered library.")
     sync.add_argument(
@@ -503,13 +430,6 @@ def main() -> None:
 
 
 def _run() -> None:
-    # Load environment variables from .env file if present
-    load_env_file()
-
-    # Clean up API Key from env if present (remove whitespace/newlines)
-    if os.environ.get("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"].strip()
-
     parser = _build_arg_parser()
     args = parser.parse_args()
     if args.command == "library" and args.library_command is None:
@@ -521,8 +441,8 @@ def _run() -> None:
         parser.error("--json requires --query, --context or --overview.")
     if args.files and not args.query:
         parser.error("--files requires --query.")
-    if args.context and (args.query or args.chat):
-        parser.error("--context cannot be combined with --query or --chat.")
+    if args.context and args.query:
+        parser.error("--context cannot be combined with --query.")
     if args.context_radius < 0:
         parser.error("--context-radius cannot be negative.")
     try:
@@ -542,13 +462,12 @@ def _run() -> None:
 
     from research_lite.embedding.embedding_builder import build_default_embedding_service
     from research_lite.ingestion import SUPPORTED_EXTENSIONS
-    from research_lite.library_stats import inspect_library
     from research_lite.preprocessing import SplitConfig
     from research_lite.query_session import (
         LibraryQuerySession,
         format_sources,
     )
-    from research_lite.retrieval import CrossEncoderReranker, RerankerUnavailableError
+    from research_lite.retrieval import CrossEncoderReranker
     from research_lite.utils.loader_utils import discover_files
 
     selected_library_name: str | None = None
@@ -558,7 +477,6 @@ def _run() -> None:
     elif library_action == "use":
         args.path = str(_require_library(parser, library_registry, args.library_name))
         selected_library_name = args.library_name
-        args.chat = True
         one_click_launch = False
     elif library_action == "sync":
         args.path = str(
@@ -570,13 +488,9 @@ def _run() -> None:
     else:
         args.path = str(_require_active_library(parser, library_registry))
         one_click_launch = False
-        if not args.query and not args.context:
-            args.chat = True
 
-    try:
-        effective_llm_settings = _apply_llm_defaults(args)
-    except RuntimeError as exc:
-        parser.error(str(exc))
+    if args.overview is None and not args.query and not args.context:
+        args.overview = ""
 
     split_config = SplitConfig(chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
     current_config_fingerprint = config_fingerprint(
@@ -623,9 +537,6 @@ def _run() -> None:
             register_library(library_root, name=args.name, synced=True)
         except ValueError as exc:
             parser.error(str(exc))
-        if effective_llm_settings is not None:
-            save_llm_settings(effective_llm_settings)
-        args.chat = True
 
     if library_action == "sync":
         if _initialize_library_if_needed(
@@ -648,6 +559,8 @@ def _run() -> None:
             f"No ResearchLite library found at '{library_root / '.researchlite'}'. "
             "Run `researchlite library sync` to create and synchronize it."
         )
+    if selected_library_name is not None:
+        select_library(selected_library_name)
     if args.overview is not None:
         _print_overview(library_root, args)
         return
@@ -691,14 +604,6 @@ def _run() -> None:
         if retrieval_mode == "hybrid-rerank"
         else None
     )
-    if args.chat and reranker is not None:
-        print("Preparing local retrieval model...")
-        try:
-            reranker.warm_up()
-        except RerankerUnavailableError:
-            print("Reranker unavailable; chat will use hybrid retrieval.")
-            retrieval_mode = "hybrid"
-            reranker = None
     session = LibraryQuerySession(
         index,
         service,
@@ -708,38 +613,6 @@ def _run() -> None:
         rrf_constant=args.rrf_constant,
         reranker=reranker,
     )
-    if selected_library_name is not None:
-        select_library(selected_library_name)
-    if args.chat:
-        generator: RAGGenerator | None = None
-        if not args.no_generation:
-            from research_lite.generation import RAGGenerator
-
-            try:
-                generator = RAGGenerator(
-                    model_name=args.llm_model,
-                    api_key=args.llm_api_key or os.environ.get("OPENAI_API_KEY"),
-                    base_url=args.llm_base_url,
-                    provider=args.llm_provider,
-                )
-            except Exception as exc:
-                parser.error(str(exc))
-        from research_lite.repl import TerminalChat
-
-        library_stats = inspect_library(library_root, index)
-        TerminalChat(
-            session,
-            generate_answer=generator.generate_answer if generator else None,
-            stream_answer=generator.stream_answer if generator else None,
-            library_stats=library_stats,
-            choose_mode=generator.choose_mode if generator else None,
-            read_overview=lambda terms: inspect_library(library_root, index, terms=terms).overview(
-                terms
-            ),
-            answer_overview=generator.answer_overview if generator else None,
-        ).run()
-        return
-
     if args.files:
         outcome = session.query(args.query)
         if args.json:
@@ -770,29 +643,6 @@ def _run() -> None:
         print(f"Found {len(results)} relevant evidence chunks:")
         for evidence in outcome.as_evidence_lines():
             print(evidence)
-
-        if not args.no_generation:
-            from research_lite.generation import RAGGenerator
-
-            print("\nGenerating answer...")
-            try:
-                # Ensure we pass the cleaned key if it wasn't passed via args
-                final_api_key = args.llm_api_key or os.environ.get("OPENAI_API_KEY")
-
-                generator = RAGGenerator(
-                    model_name=args.llm_model,
-                    api_key=final_api_key,
-                    base_url=args.llm_base_url,
-                    provider=args.llm_provider,
-                )
-                answer = generator.generate_answer(args.query, results)
-                print(f"\nAnswer:\n{answer}")
-            except Exception as e:
-                print(f"Failed to generate answer: {e}")
-                if args.llm_provider == "ollama":
-                    print("Tip: Start Ollama with `ollama serve` and pull the selected model.")
-                else:
-                    print("Tip: Ensure you have set OPENAI_API_KEY or passed --llm-api-key.")
 
 
 if __name__ == "__main__":
